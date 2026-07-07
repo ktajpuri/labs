@@ -1,0 +1,15 @@
+{
+  "name": "redis-atomicity-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Failure lab: lost-update / oversell under non-atomic Redis read-modify-write",
+  "type": "commonjs",
+  "scripts": {
+    "peek": "node peek.js",
+    "reset": "node reset.js",
+    "buy": "node buy.js"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1"
+  }
+}
