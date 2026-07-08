@@ -1,0 +1,19 @@
+{
+  "name": "streaming-agg-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kafka -> Flink SQL -> Kafka -> ClickHouse streaming aggregation failure lab",
+  "scripts": {
+    "produce": "KAFKAJS_NO_PARTITIONER_WARNING=1 node producer/produce.js",
+    "inject-late": "KAFKAJS_NO_PARTITIONER_WARNING=1 node producer/inject-late.js",
+    "inject-dup": "KAFKAJS_NO_PARTITIONER_WARNING=1 node producer/inject-dup.js",
+    "blast": "KAFKAJS_NO_PARTITIONER_WARNING=1 node producer/blast.js",
+    "sink": "KAFKAJS_NO_PARTITIONER_WARNING=1 node sink/consume.js",
+    "query": "node query/query.js",
+    "flink-metrics": "node query/flink-metrics.js"
+  },
+  "dependencies": {
+    "@clickhouse/client": "^1.7.0",
+    "kafkajs": "^2.2.4"
+  }
+}

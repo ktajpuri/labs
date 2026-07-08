@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: ClickHouse
+    uid: clickhouse-lab
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: true
+    jsonData:
+      host: clickhouse           # compose service name (grafana -> clickhouse over the internal network)
+      port: 9000                 # ClickHouse native protocol
+      protocol: native
+      username: lab
+      defaultDatabase: lab
+    secureJsonData:
+      password: lab

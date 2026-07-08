@@ -1,0 +1,104 @@
+name: streaming-agg-lab
+
+# The infra tier only. The Node scripts (producer, sink, query) run on your
+# HOST so you can read every line and watch them work — they connect in via
+# the published ports below.
+#
+#   Node producer -> Kafka 'events' -> Flink SQL -> Kafka 'agg-results' -> Node sink -> ClickHouse <- Node query
+#
+services:
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: sal-kafka
+    ports:
+      - "29092:29092"          # host-facing listener (Node connects here)
+    environment:
+      # --- KRaft (no Zookeeper): this single node is both broker + controller
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # Two client listeners: 9092 for containers (Flink), 29092 for the host (Node)
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # single-broker sizing
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Force explicit topic creation (production-realistic; you'll run kafka-topics yourself)
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 1
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  jobmanager:
+    build: ./flink
+    image: sal-flink:1.20
+    container_name: sal-jobmanager
+    ports:
+      - "8081:8081"            # Flink web UI: http://localhost:8081
+    command: jobmanager
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./flink:/sql           # aggregate.sql mounted at /sql/aggregate.sql
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        rest.address: jobmanager
+        parallelism.default: 1
+
+  taskmanager:
+    build: ./flink
+    image: sal-flink:1.20
+    container_name: sal-taskmanager
+    command: taskmanager
+    depends_on:
+      - jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: sal-clickhouse
+    ports:
+      - "8123:8123"            # HTTP (Node @clickhouse/client connects here)
+      - "9000:9000"            # native (clickhouse-client CLI)
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      # The built-in 'default' user is localhost-only in this image; provision a
+      # network-reachable app user so the host Node clients can connect over HTTP.
+      CLICKHOUSE_USER: lab
+      CLICKHOUSE_PASSWORD: lab
+      CLICKHOUSE_DB: lab
+    volumes:
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: sal-grafana
+    ports:
+      - "3000:3000"                       # UI: http://localhost:3000
+    environment:
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource   # installs the official CH plugin on boot (needs internet)
+      GF_AUTH_ANONYMOUS_ENABLED: "true"   # no login for the lab
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - clickhouse
