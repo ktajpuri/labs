@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Three Ways to Arrange Bytes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#10141A; --panel:#171C24; --panel2:#1E242E;
+    --grid:#232B37; --line:#323C4B;
+    --text:#E4E9F0; --muted:#8B96A8; --faint:#59647A;
+    --pg:#F0A93B; --ch:#38C2E4; --cass:#B57BFF;
+    --waste:#FF6B6B; --used:#5FD3A0;
+    --mono:'IBM Plex Mono',monospace;
+    --sans:'IBM Plex Sans',sans-serif;
+    --disp:'Space Grotesk',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--ink); color:var(--text); font-family:var(--sans);
+    line-height:1.6; font-size:16px;
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:32px 32px;
+    background-position:center top;
+  }
+  .wrap{max-width:1000px;margin:0 auto;padding:0 24px}
+  section{padding:72px 0;border-bottom:1px solid var(--line)}
+  section:last-of-type{border-bottom:none}
+
+  /* ---- type ---- */
+  h1{font-family:var(--disp);font-weight:700;font-size:clamp(2.4rem,6vw,4.2rem);
+     line-height:1.02;letter-spacing:-.02em}
+  h2{font-family:var(--disp);font-weight:600;font-size:clamp(1.6rem,3.5vw,2.4rem);
+     letter-spacing:-.01em;line-height:1.1}
+  h3{font-family:var(--disp);font-weight:500;font-size:1.15rem;letter-spacing:.01em}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;
+     text-transform:uppercase;color:var(--faint);margin-bottom:18px}
+  p{color:var(--muted);max-width:64ch}
+  p.lead{font-size:1.18rem;color:var(--text);max-width:60ch}
+  strong{color:var(--text);font-weight:600}
+  .mono{font-family:var(--mono)}
+  em{color:var(--text);font-style:normal;border-bottom:1px dashed var(--faint)}
+
+  /* ---- hero ---- */
+  .hero{padding:110px 0 84px}
+  .hero .tag{display:inline-block;font-family:var(--mono);font-size:.72rem;
+     letter-spacing:.2em;text-transform:uppercase;color:var(--faint);
+     border:1px solid var(--line);border-radius:2px;padding:6px 12px;margin-bottom:28px}
+  .hero h1 span{display:block}
+  .hero h1 .l2{color:var(--pg)}
+  .hero h1 .l3{color:var(--ch)}
+  .hero h1 .l4{color:var(--cass)}
+  .hero p.lead{margin-top:28px}
+  .hero .sub{margin-top:14px;font-size:.95rem;color:var(--faint);font-family:var(--mono)}
+
+  /* ---- engine key ---- */
+  .key{display:flex;gap:22px;flex-wrap:wrap;margin-top:40px}
+  .key .k{display:flex;align-items:center;gap:9px;font-family:var(--mono);
+     font-size:.82rem;color:var(--muted)}
+  .key .dot{width:11px;height:11px;border-radius:2px;flex:none}
+  .dot.pg{background:var(--pg)} .dot.ch{background:var(--ch)} .dot.cass{background:var(--cass)}
+
+  /* ---- callout ---- */
+  .note{border-left:2px solid var(--line);padding:4px 0 4px 20px;margin:26px 0;
+     font-size:.98rem}
+  .note.pg{border-color:var(--pg)} .note.ch{border-color:var(--ch)} .note.cass{border-color:var(--cass)}
+  .note .lbl{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;
+     text-transform:uppercase;display:block;margin-bottom:6px;color:var(--faint)}
+
+  /* ---- lab tie-in badge ---- */
+  .measured{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);
+     font-size:.76rem;color:var(--used);background:rgba(95,211,160,.08);
+     border:1px solid rgba(95,211,160,.25);border-radius:3px;padding:5px 10px;margin-top:8px}
+  .measured::before{content:'▸ measured';color:var(--used);font-size:.66rem;
+     letter-spacing:.1em;opacity:.8}
+
+  /* ---- panels ---- */
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+     padding:28px;margin-top:32px}
+  .panel-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+  .panel-head .num{font-family:var(--mono);font-size:.8rem;color:var(--faint)}
+  .panel .engine-name{font-family:var(--disp);font-weight:600;font-size:1.35rem}
+  .panel .layout-tag{font-family:var(--mono);font-size:.78rem;color:var(--muted);
+     margin-bottom:22px}
+
+  /* ---- byte grid ---- */
+  .stage{background:var(--ink);border:1px solid var(--line);border-radius:5px;
+     padding:22px;overflow-x:auto}
+  .stage-label{font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;
+     text-transform:uppercase;color:var(--faint);margin-bottom:16px;display:flex;
+     justify-content:space-between;align-items:center;gap:12px}
+  .readhead{font-family:var(--mono);font-size:.72rem;color:var(--muted)}
+  .readhead b{color:var(--waste);font-weight:600}
+  .readhead .u{color:var(--used);font-weight:600}
+
+  .cell{font-family:var(--mono);font-size:.72rem;height:26px;display:flex;
+     align-items:center;justify-content:center;border-radius:2px;
+     background:var(--panel2);border:1px solid var(--grid);color:var(--faint);
+     transition:background .18s,color .18s,border-color .18s,transform .18s,box-shadow .18s;
+     white-space:nowrap;user-select:none}
+  .cell.read{background:#3a2323;border-color:var(--waste);color:#ffd7d7}
+  .cell.used{background:#1e3a2f;border-color:var(--used);color:#c8ffe8}
+  .cell.skip{opacity:.28}
+  .cell.hot{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.4)}
+  .cell.pgk{border-color:var(--pg);color:var(--pg)}
+  .cell.chk{border-color:var(--ch);color:var(--ch)}
+  .cell.cassk{border-color:var(--cass);color:var(--cass)}
+
+  .colhdr{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;
+     text-transform:uppercase;color:var(--faint);height:20px;display:flex;
+     align-items:center;justify-content:center}
+  .colhdr.fat{color:var(--waste)}
+
+  /* row-major grid */
+  .rowgrid{display:grid;grid-template-columns:44px 60px 58px 74px 58px 1fr;
+     gap:4px;min-width:440px}
+  .rowgrid .payload{background:var(--panel2)}
+  /* col-major grid */
+  .colgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;min-width:520px}
+  .colstrip{display:flex;flex-direction:column;gap:4px}
+  .colstrip .colhdr{margin-bottom:2px}
+
+  /* controls */
+  .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+  button.op{font-family:var(--mono);font-size:.8rem;color:var(--text);
+     background:var(--panel2);border:1px solid var(--line);border-radius:4px;
+     padding:9px 15px;cursor:pointer;transition:border-color .15s,background .15s;
+     display:inline-flex;align-items:center;gap:8px}
+  button.op:hover{border-color:var(--muted);background:#242c38}
+  button.op:focus-visible{outline:2px solid var(--ch);outline-offset:2px}
+  button.op:disabled{opacity:.4;cursor:default}
+  button.op .k{width:8px;height:8px;border-radius:50%}
+  button.op.pg .k{background:var(--pg)} button.op.ch .k{background:var(--ch)}
+  button.op.cass .k{background:var(--cass)}
+  button.reset{color:var(--faint);border-style:dashed}
+
+  .verdict{margin-top:18px;font-size:.95rem;min-height:1.6em;color:var(--muted);
+     font-family:var(--sans)}
+  .verdict.show{color:var(--text)}
+  .verdict .big{font-family:var(--mono);color:var(--text);font-weight:600}
+
+  /* svg diagrams */
+  .svgstage{background:var(--ink);border:1px solid var(--line);border-radius:5px;
+     padding:22px;margin-top:4px}
+  svg{width:100%;height:auto;display:block;overflow:visible}
+  .node{transition:opacity .25s,fill .25s}
+  .edge{stroke:var(--line);stroke-width:1.5;fill:none;transition:stroke .25s,opacity .25s}
+  .edge.lit{stroke:var(--pg);stroke-width:2.5}
+  text.dlabel{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+  text.dtitle{font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+     text-transform:uppercase;fill:var(--faint)}
+
+  /* grain / matrix */
+  .matrix{width:100%;border-collapse:separate;border-spacing:0;margin-top:28px;
+     font-size:.9rem}
+  .matrix th,.matrix td{text-align:left;padding:14px 16px;border-bottom:1px solid var(--line);
+     vertical-align:top}
+  .matrix th{font-family:var(--mono);font-size:.72rem;letter-spacing:.1em;
+     text-transform:uppercase;color:var(--faint);font-weight:500}
+  .matrix td:first-child{color:var(--text);font-weight:500;font-family:var(--sans)}
+  .matrix .win{color:var(--used);font-weight:600}
+  .matrix .lose{color:var(--waste)}
+  .matrix .mid{color:var(--muted)}
+  .matrix .eng{font-family:var(--mono);font-size:.82rem}
+  .matrix .eng.pg{color:var(--pg)} .matrix .eng.ch{color:var(--ch)} .matrix .eng.cass{color:var(--cass)}
+
+  .grainbox{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:28px}
+  @media(max-width:640px){.grainbox{grid-template-columns:1fr}}
+  .grainbox .g{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:24px}
+  .grainbox .g h3{margin-bottom:10px}
+  .grainbox .along{border-top:2px solid var(--used)}
+  .grainbox .across{border-top:2px solid var(--waste)}
+
+  .final{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+     padding:34px;margin-top:8px}
+  .final p{color:var(--text);max-width:none;font-size:1.05rem}
+  .final .fq{font-family:var(--disp);font-weight:600;font-size:1.3rem;margin:24px 0 8px;
+     line-height:1.3}
+  .final .fq.pg{color:var(--pg)} .final .fq.ch{color:var(--ch)} .final .fq.cass{color:var(--cass)}
+
+  footer{padding:40px 0 80px;color:var(--faint);font-family:var(--mono);font-size:.78rem}
+
+  @media(prefers-reduced-motion:reduce){
+    *{transition:none!important;animation:none!important}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== HERO ===================== -->
+<div class="wrap">
+<header class="hero">
+  <span class="tag">Storage engines · from first principles</span>
+  <h1>
+    <span>Same bytes.</span>
+    <span>Three ways</span>
+    <span>to arrange them.</span>
+  </h1>
+  <p class="lead">A row store, a column store, and an LSM partition store hold the
+    exact same table. The <em>arrangement</em> — not the code, not the speed of the
+    machine — decides which queries fly and which ones fall off a cliff.</p>
+  <p class="sub">Postgres · ClickHouse · Cassandra — one mental model for all three.</p>
+  <div class="key">
+    <div class="k"><span class="dot pg"></span>Postgres — B-tree row store</div>
+    <div class="k"><span class="dot ch"></span>ClickHouse — columnar MergeTree</div>
+    <div class="k"><span class="dot cass"></span>Cassandra — LSM, partition-addressed</div>
+  </div>
+</header>
+</div>
+
+<!-- ===================== THE MASTER QUESTION ===================== -->
+<section>
+<div class="wrap">
+  <div class="eyebrow">The one question underneath all of it</div>
+  <h2>How many bytes must I read to answer this query?</h2>
+  <p style="margin-top:20px">Every storage engine is a bet on that single number. A disk (or
+    even RAM) reads in <strong>blocks</strong>, not individual values. So the real cost of a query
+    isn't "how many rows match" — it's <strong>how many bytes the engine is forced to drag off
+    storage to find them.</strong> The ratio of bytes-read to bytes-you-actually-wanted has a name:</p>
+  <div class="note">
+    <span class="lbl">Read amplification</span>
+    You asked for 20 bytes. The engine read 4 KB to get them. That's 200× read amplification —
+    and it's the difference between 400ms and 6 seconds on the same data.
+  </div>
+  <p>A storage layout is just a <strong>decision about what to keep physically next to what</strong>,
+    so that the queries you care about read mostly bytes they need, and the queries you don't care
+    about pay the amplification instead. There is no free arrangement. Every layout is fast along
+    one grain and slow across it. The three engines below made three different bets.</p>
+  <p style="margin-top:16px;color:var(--faint);font-size:.9rem">The animations are the point. Each
+    panel below lets you <strong style="color:var(--muted)">run</strong> an operation and watch
+    exactly which cells get read (<span style="color:var(--waste)">red = read but wasted</span>,
+    <span style="color:var(--used)">green = read and used</span>, dim = never touched).</p>
+</div>
+</section>
+
+<!-- ===================== POSTGRES ===================== -->
+<section>
+<div class="wrap">
+  <div class="eyebrow" style="color:var(--pg)">Layout 01</div>
+  <h2>Row store + B-tree <span style="color:var(--pg)">— organized around the row</span></h2>
+  <p style="margin-top:18px">Postgres keeps each <strong>whole row contiguous</strong> on disk. All
+    of row 1's columns sit together, then all of row 2's, and so on. To find a specific row fast, it
+    builds a <strong>B-tree index</strong>: a shallow sorted tree that lets you jump from 20 million
+    rows to the exact one in about four hops. The bet: <em>you'll usually want a whole record, found by its key.</em></p>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="num">postgres</span>
+      <span class="engine-name" style="color:var(--pg)">Rows sit together</span>
+    </div>
+    <div class="layout-tag">each row is one contiguous strip · payload travels with every row whether you want it or not</div>
+
+    <div class="stage">
+      <div class="stage-label">
+        <span>disk layout · row-major</span>
+        <span class="readhead" id="pg-read">bytes read: <b>0</b> wasted · <span class="u">0</span> used</span>
+      </div>
+      <div class="rowgrid" id="pg-grid"></div>
+    </div>
+
+    <div class="controls">
+      <button class="op pg" data-pg="point"><span class="k"></span>Run point lookup <span style="color:var(--faint)">— WHERE id = 7</span></button>
+      <button class="op pg" data-pg="scan"><span class="k"></span>Run column scan <span style="color:var(--faint)">— SUM(amount)</span></button>
+      <button class="op reset" data-pg="reset">reset</button>
+    </div>
+    <div class="verdict" id="pg-verdict">Run an operation to see which bytes the row layout is forced to touch.</div>
+  </div>
+
+  <div class="svgstage" style="margin-top:24px">
+    <div class="stage-label"><span>the b-tree jump · 20M rows → 1 row in ~4 hops</span>
+      <button class="op pg" data-pg="btree" style="padding:6px 12px"><span class="k"></span>descend</button></div>
+    <svg id="btree" viewBox="0 0 720 220" role="img" aria-label="B-tree descent from root to a single leaf row">
+      <!-- edges -->
+      <path class="edge" id="e1" d="M360,42 L180,100"/>
+      <path class="edge" id="e2" d="M360,42 L360,100"/>
+      <path class="edge" id="e3" d="M360,42 L540,100"/>
+      <path class="edge" id="e4" d="M360,120 L300,168"/>
+      <path class="edge" id="e5" d="M360,120 L360,168"/>
+      <path class="edge" id="e6" d="M360,120 L420,168"/>
+      <!-- root -->
+      <g class="node" id="n-root"><rect x="320" y="20" width="80" height="26" rx="3" fill="var(--panel2)" stroke="var(--line)"/><text x="360" y="37" text-anchor="middle" class="dlabel">root</text></g>
+      <!-- branch -->
+      <g class="node" id="n-b1"><rect x="140" y="88" width="80" height="26" rx="3" fill="var(--panel2)" stroke="var(--line)"/><text x="180" y="105" text-anchor="middle" class="dlabel">1–7M</text></g>
+      <g class="node" id="n-b2"><rect x="320" y="88" width="80" height="26" rx="3" fill="var(--panel2)" stroke="var(--line)"/><text x="360" y="105" text-anchor="middle" class="dlabel">7–14M</text></g>
+      <g class="node" id="n-b3"><rect x="500" y="88" width="80" height="26" rx="3" fill="var(--panel2)" stroke="var(--line)"/><text x="540" y="105" text-anchor="middle" class="dlabel">14–20M</text></g>
+      <!-- leaves -->
+      <g class="node" id="n-l1"><rect x="264" y="156" width="72" height="26" rx="3" fill="var(--panel2)" stroke="var(--line)"/><text x="300" y="173" text-anchor="middle" class="dlabel">id 6</text></g>
+      <g class="node" id="n-l2"><rect x="344" y="156" width="72" height="26" rx="3" fill="var(--panel2)" stroke="var(--line)"/><text x="380" y="173" text-anchor="middle" class="dlabel">id 7</text></g>
+      <g class="node" id="n-l3"><rect x="424" y="156" width="72" height="26" rx="3" fill="var(--panel2)" stroke="var(--line)"/><text x="460" y="173" text-anchor="middle" class="dlabel">id 8</text></g>
+      <text x="360" y="208" text-anchor="middle" class="dtitle">lands directly on the row · never scans its neighbours</text>
+    </svg>
+  </div>
+
+  <div class="note pg">
+    <span class="lbl">What it optimizes</span>
+    Jump-to-one-record and change-it-in-place. The B-tree makes point lookups nearly flat as the
+    table grows (depth grows <em>logarithmically</em>). The cost lives on the other side: a scan that
+    needs only <span class="mono">amount</span> still drags the fat <span class="mono">payload</span>
+    off disk on every single row, because the row is the unit of storage.
+  </div>
+  <div class="measured">point lookup 1.37ms · but full-column aggregate 5,871ms (paying for payload it never uses)</div>
+</div>
+</section>
+
+<!-- ===================== CLICKHOUSE ===================== -->
+<section>
+<div class="wrap">
+  <div class="eyebrow" style="color:var(--ch)">Layout 02</div>
+  <h2>Columnar MergeTree <span style="color:var(--ch)">— organized around the column</span></h2>
+  <p style="margin-top:18px">ClickHouse stores each <strong>column contiguously</strong> instead: every
+    <span class="mono">amount</span> value together, every <span class="mono">payload</span> together.
+    A query that sums <span class="mono">amount</span> reads <em>only the amount column</em> and never
+    touches payload at all. Same values sitting side by side also <strong>compress far better</strong>.
+    The bet: <em>you'll scan many rows but only a few columns.</em></p>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="num">clickhouse</span>
+      <span class="engine-name" style="color:var(--ch)">Columns sit together</span>
+    </div>
+    <div class="layout-tag">each column is one contiguous strip · a scan reads only the strips it names</div>
+
+    <div class="stage">
+      <div class="stage-label">
+        <span>disk layout · column-major</span>
+        <span class="readhead" id="ch-read">bytes read: <b>0</b> wasted · <span class="u">0</span> used</span>
+      </div>
+      <div class="colgrid" id="ch-grid"></div>
+    </div>
+
+    <div class="controls">
+      <button class="op ch" data-ch="scan"><span class="k"></span>Run column scan <span style="color:var(--faint)">— SUM(amount)</span></button>
+      <button class="op ch" data-ch="point"><span class="k"></span>Run point lookup <span style="color:var(--faint)">— WHERE id = 7</span></button>
+      <button class="op reset" data-ch="reset">reset</button>
+    </div>
+    <div class="verdict" id="ch-verdict">Run the same two operations and compare what the column layout touches.</div>
+  </div>
+
+  <div class="note ch">
+    <span class="lbl">The point-lookup twist</span>
+    ClickHouse has <strong>no per-row index</strong>. Its "primary index" is <em>sparse</em> — one
+    marker per <strong>granule</strong> of ~8,192 rows. A lookup by key finds the right granule, then
+    reads and scans <em>the whole granule</em> to find one row. So a "point" read still touches
+    thousands of rows — bounded and cheap, but never as sharp as a B-tree. This is the single
+    prediction most people get wrong: they expect either instant (like Postgres) or scan-slow. It's
+    neither.
+  </div>
+  <div class="measured">aggregate 415ms (~14× faster than Postgres) · point lookup 9.9ms — respectable, never scan-slow</div>
+
+  <div class="note ch">
+    <span class="lbl">The catch nobody sees coming</span>
+    The sort order is fixed <strong>at table creation</strong> (the <span class="mono">ORDER BY</span> key).
+    You cannot add a B-tree later to make a new column fast — a filter on an unplanned column is
+    <em>always</em> a full column scan. Fast because columnar, but there's no escape hatch to
+    point-read.
+  </div>
+</div>
+</section>
+
+<!-- ===================== CASSANDRA ===================== -->
+<section>
+<div class="wrap">
+  <div class="eyebrow" style="color:var(--cass)">Layout 03</div>
+  <h2>LSM, partition-addressed <span style="color:var(--cass)">— organized around the write</span></h2>
+  <p style="margin-top:18px">Cassandra optimizes a different thing entirely: <strong>never make a write
+    wait for a disk seek.</strong> Writes append to memory, get flushed later as immutable files, and
+    reads find data by <strong>hashing the partition key</strong> straight to its location. The bet:
+    <em>a firehose of writes, keyed by something natural, read back by that same key — and it must
+    scale past one machine.</em></p>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="num">cassandra</span>
+      <span class="engine-name" style="color:var(--cass)">Writes never seek</span>
+    </div>
+    <div class="layout-tag">memtable in RAM → flush to immutable SSTable → compaction merges later</div>
+
+    <div class="svgstage" style="border:none;padding:0">
+      <div class="stage-label"><span>the LSM write path · why it's a write firehose</span></div>
+      <svg id="lsm" viewBox="0 0 720 250" role="img" aria-label="LSM write path: memtable to SSTables to compaction">
+        <!-- lanes -->
+        <text x="90" y="24" text-anchor="middle" class="dtitle">RAM</text>
+        <text x="360" y="24" text-anchor="middle" class="dtitle">disk · SSTables</text>
+        <text x="620" y="24" text-anchor="middle" class="dtitle">compaction</text>
+        <line x1="180" y1="10" x2="180" y2="240" class="edge" opacity=".4"/>
+        <line x1="500" y1="10" x2="500" y2="240" class="edge" opacity=".4"/>
+        <!-- memtable -->
+        <g id="memtable"><rect x="34" y="70" width="112" height="90" rx="4" fill="var(--panel2)" stroke="var(--line)"/>
+          <text x="90" y="60" text-anchor="middle" class="dlabel">memtable</text></g>
+        <!-- incoming writes -->
+        <g id="w1" opacity="0"><rect x="60" y="86" width="60" height="16" rx="2" fill="var(--cass)" opacity=".9"/></g>
+        <g id="w2" opacity="0"><rect x="60" y="106" width="60" height="16" rx="2" fill="var(--cass)" opacity=".9"/></g>
+        <g id="w3" opacity="0"><rect x="60" y="126" width="60" height="16" rx="2" fill="var(--cass)" opacity=".9"/></g>
+        <!-- sstables -->
+        <g id="sst1" opacity="0"><rect x="250" y="60" width="90" height="40" rx="4" fill="var(--panel2)" stroke="var(--cass)"/><text x="295" y="84" text-anchor="middle" class="dlabel">SSTable</text></g>
+        <g id="sst2" opacity="0"><rect x="250" y="112" width="90" height="40" rx="4" fill="var(--panel2)" stroke="var(--cass)"/><text x="295" y="136" text-anchor="middle" class="dlabel">SSTable</text></g>
+        <g id="sst3" opacity="0"><rect x="360" y="86" width="90" height="40" rx="4" fill="var(--panel2)" stroke="var(--cass)"/><text x="405" y="110" text-anchor="middle" class="dlabel">SSTable</text></g>
+        <!-- merged -->
+        <g id="merged" opacity="0"><rect x="560" y="86" width="120" height="46" rx="4" fill="#2a1e3a" stroke="var(--cass)"/><text x="620" y="114" text-anchor="middle" class="dlabel" style="fill:var(--cass)">1 merged file</text></g>
+        <path id="flowA" class="edge" d="M150,115 L246,90" opacity="0"/>
+        <path id="flowB" class="edge" d="M346,106 L556,109" opacity="0"/>
+      </svg>
+    </div>
+
+    <div class="controls">
+      <button class="op cass" data-cass="write"><span class="k"></span>Run the write path</button>
+      <button class="op cass" data-cass="point"><span class="k"></span>Read by partition key <span style="color:var(--faint)">— WHERE id = 7</span></button>
+      <button class="op cass" data-cass="cross"><span class="k"></span>Query across partitions <span style="color:var(--faint)">— WHERE user_id = X</span></button>
+      <button class="op reset" data-cass="reset">reset</button>
+    </div>
+    <div class="verdict" id="cass-verdict">Writes go to memory first — that's why they never wait on a disk seek.</div>
+  </div>
+
+  <div class="note cass">
+    <span class="lbl">What it optimizes</span>
+    Write throughput and horizontal scale. Appending to memory means writes never seek; the price is
+    paid later, at <em>read</em> time (a key may live in several SSTables) and at <em>compaction</em>.
+    Add nodes and write throughput grows roughly linearly — the single-node number understates it.
+  </div>
+  <div class="measured">highest sustained random-key writes (~7,200/s, single node) · point read by key 3.56ms</div>
+
+  <div class="note cass">
+    <span class="lbl">The cliff — no graceful slow mode</span>
+    Every other layout <em>degrades</em> off its grain: a Postgres scan is slow but runs; a ClickHouse
+    filter is a scan but returns. Cassandra doesn't degrade off the partition key — it
+    <strong>refuses or fails</strong>. A cross-partition aggregate took <em>4.2 minutes</em>
+    client-side; a filter on a non-key column errored outright. If you need a second access path, you
+    build a second table. You don't add an index.
+  </div>
+</div>
+</section>
+
+<!-- ===================== DECISION AXES ===================== -->
+<section>
+<div class="wrap">
+  <div class="eyebrow">Reasoning it out</div>
+  <h2>Which grain does your query cut along?</h2>
+  <p style="margin-top:18px">You don't memorize a table — you reason from one question per axis. Each
+    engine wins where the query runs <em>along</em> the grain its bytes are organized around, and
+    loses where it cuts <em>across</em>.</p>
+
+  <table class="matrix">
+    <thead><tr><th>The question you ask about the workload</th><th>Reach for</th><th>Why (from the lab)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Fetch whole records by a known key, most of the time?</td>
+        <td><span class="eng pg">Postgres</span></td>
+        <td><span class="win">1.37ms</span> — B-tree lands on the row; nothing else approximates it.</td>
+      </tr>
+      <tr>
+        <td>Scan millions of rows but only a few columns (SUMs, dashboards)?</td>
+        <td><span class="eng ch">ClickHouse</span></td>
+        <td><span class="win">415ms vs 5,871ms</span> — reads only the columns named, compressed.</td>
+      </tr>
+      <tr>
+        <td>Write firehose keyed by device/user/session, read back by that key, must outgrow one node?</td>
+        <td><span class="eng cass">Cassandra</span></td>
+        <td><span class="win">~7,200/s</span> and scales linearly by adding nodes.</td>
+      </tr>
+      <tr>
+        <td>People will filter on columns you didn't plan for?</td>
+        <td><span class="eng pg">Postgres</span></td>
+        <td><span class="win">CREATE INDEX</span> turns a 6.7s scan into 4ms. The only late escape hatch.</td>
+      </tr>
+      <tr>
+        <td>Writes arrive strictly row-by-row, no batching possible?</td>
+        <td><span class="eng pg">not ClickHouse</span></td>
+        <td><span class="lose">~400/s</span> row-by-row — every insert creates a storage part. Batch, or buffer with Kafka.</td>
+      </tr>
+      <tr>
+        <td>Provisioning tight or bursty?</td>
+        <td><span class="eng pg">Postgres</span></td>
+        <td>Under a 512MB cap: PG spilled to disk and held; <span class="lose">ClickHouse OOM-crashed</span>.</td>
+      </tr>
+      <tr>
+        <td>Mixed, unknown, or evolving — you're not sure yet?</td>
+        <td><span class="eng pg">Postgres</span></td>
+        <td class="mid">The default until a measurement proves you need to move off it.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="grainbox">
+    <div class="g along">
+      <h3 style="color:var(--used)">Along the grain</h3>
+      <p>The query reads mostly the bytes it needs. Postgres fetching a row by id. ClickHouse summing
+        one column. Cassandra reading by partition key. This is the fast path each engine was
+        <em>built</em> to serve — often orders of magnitude ahead of the others.</p>
+    </div>
+    <div class="g across">
+      <h3 style="color:var(--waste)">Across the grain</h3>
+      <p>The query fights the layout. Postgres dragging payload through a column scan. ClickHouse
+        filtering an unplanned column. Cassandra crossing partitions. Postgres and ClickHouse
+        <em>degrade</em> here; Cassandra <em>falls off a cliff</em> — slow, then impossible.</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ===================== FINAL ===================== -->
+<section>
+<div class="wrap">
+  <div class="eyebrow">Reproduce this cold</div>
+  <h2>The interview version</h2>
+  <div class="final">
+    <p>Each engine organizes its bytes around a different thing, and that choice decides everything
+      downstream:</p>
+
+    <div class="fq pg">A row store organizes bytes around the row.</div>
+    <p>Wins when you want whole records by key. Loses when you scan millions of rows for two columns —
+      it drags the whole row off disk to read a sliver of it.</p>
+
+    <div class="fq ch">A column store organizes bytes around the column.</div>
+    <p>Wins scans and aggregates by an order of magnitude, and stays acceptable at point reads via a
+      sparse granule index. But every insert creates a storage part, so write cost only amortizes in
+      batches — and the sort order is frozen at table creation.</p>
+
+    <div class="fq cass">An LSM partition store organizes bytes around the partition key.</div>
+    <p>Writes never seek and scale linearly across nodes. But any access path that crosses partitions
+      doesn't slow down gracefully — it fails.</p>
+
+    <p style="margin-top:28px;border-top:1px solid var(--line);padding-top:24px">
+      <strong>The flip trigger is never the engine's quality.</strong> It's whether the query cuts
+      <em>along</em> the layout's grain or <em>across</em> it. Default to Postgres; reach for ClickHouse
+      when the workload is provably "few columns, many rows, batchable writes"; reach for Cassandra when
+      it's provably "one partition key, write-heavy, multi-node."</p>
+  </div>
+</div>
+</section>
+
+<div class="wrap"><footer>storage-layout first principles · companion to the storage-layout failure lab · every number measured, not quoted</footer></div>
+
+<script>
+"use strict";
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sleep = ms => new Promise(r => setTimeout(r, reduce ? 0 : ms));
+
+// ---- shared dataset ----
+const COLS = ['id','user_id','type','ts','amount','payload'];
+const ROWS = [
+  [1,'u:8842','click','..14','72.4','aX9..'],
+  [2,'u:1290','view','..09','23.8','bK2..'],
+  [3,'u:5567','error','..31','63.9','cP1..'],
+  [4,'u:9901','click','..07','82.5','dM4..'],
+  [5,'u:7740','signup','..17','96.4','eR8..'],
+  [6,'u:5112','refund','..20','77.2','fT0..'],
+  [7,'u:1403','click','..05','15.2','gW6..'],
+  [8,'u:1943','view','..19','92.9','hV5..'],
+  [9,'u:9910','error','..15','59.8','iP3..'],
+  [10,'u:2234','purchase','..09','41.0','jZ7..'],
+];
+const AMT_IDX = 4, PAY_IDX = 5, TARGET_ID = 7;
+
+// ---------- POSTGRES: row-major grid ----------
+const pgGrid = document.getElementById('pg-grid');
+const pgRead = document.getElementById('pg-read');
+const pgVerdict = document.getElementById('pg-verdict');
+const pgCells = []; // [row][col]
+function buildPg(){
+  // header
+  COLS.forEach((c,i)=>{
+    const h=document.createElement('div');
+    h.className='colhdr'+(i===PAY_IDX?' fat':'');
+    h.textContent=c;
+    pgGrid.appendChild(h);
+  });
+  ROWS.forEach((row,r)=>{
+    const rowCells=[];
+    row.forEach((v,c)=>{
+      const cell=document.createElement('div');
+      cell.className='cell'+(c===PAY_IDX?' payload':'');
+      cell.textContent = c===0 ? v : v;
+      pgGrid.appendChild(cell);
+      rowCells.push(cell);
+    });
+    pgCells.push(rowCells);
+  });
+}
+buildPg();
+function pgResetCells(){pgCells.flat().forEach(c=>c.className=c.className.replace(/ (read|used|skip|hot|pgk)/g,''));
+  pgRead.innerHTML='bytes read: <b>0</b> wasted · <span class="u">0</span> used';}
+function setPgRead(wasted,used){pgRead.innerHTML=`bytes read: <b>${wasted}</b> wasted · <span class="u">${used}</span> used`;}
+
+let pgBusy=false;
+async function pgPoint(){
+  if(pgBusy)return; pgBusy=true; pgResetCells();
+  pgVerdict.className='verdict'; pgVerdict.textContent='Descending the B-tree to id = 7…';
+  const r = TARGET_ID-1;
+  pgCells[r].forEach(c=>c.classList.add('hot'));
+  await sleep(400);
+  pgCells[r].forEach((c,i)=>{ c.classList.remove('hot'); c.classList.add(i===AMT_IDX?'used':'read'); });
+  pgCells.forEach((rc,i)=>{ if(i!==r) rc.forEach(c=>c.classList.add('skip')); });
+  setPgRead('1 row','1 row');
+  pgVerdict.className='verdict show';
+  pgVerdict.innerHTML='<span class="big">One row read.</span> The B-tree jumps straight to id 7 and reads only that row. Along the grain — this is exactly what a row store is for.';
+  pgBusy=false;
+}
+async function pgScan(){
+  if(pgBusy)return; pgBusy=true; pgResetCells();
+  pgVerdict.className='verdict'; pgVerdict.textContent='Scanning for SUM(amount) — but rows are the unit of storage…';
+  let wasted=0;
+  for(let r=0;r<pgCells.length;r++){
+    pgCells[r].forEach((c,i)=>{
+      if(i===AMT_IDX){c.classList.add('used');}
+      else {c.classList.add('read'); wasted++;}
+    });
+    setPgRead(wasted+' cells', (r+1)+' amounts');
+    await sleep(reduce?0:130);
+  }
+  pgVerdict.className='verdict show';
+  pgVerdict.innerHTML='<span class="big">Every cell read; only one column used.</span> To sum <span class="mono">amount</span>, the row layout drags the whole row — including the fat <span class="mono">payload</span> — off disk on all 10 rows. <span style="color:var(--waste)">That wasted read is the 5,871ms.</span>';
+  pgBusy=false;
+}
+async function btreeDescend(){
+  const path=['n-root','n-b2','n-l2']; const edges=['e2','e5'];
+  ['n-root','n-b1','n-b2','n-b3','n-l1','n-l2','n-l3'].forEach(id=>{
+    document.getElementById(id).querySelector('rect').setAttribute('stroke','var(--line)');
+    document.getElementById(id).style.opacity=1;});
+  ['e1','e2','e3','e4','e5','e6'].forEach(id=>document.getElementById(id).classList.remove('lit'));
+  for(let i=0;i<path.length;i++){
+    document.getElementById(path[i]).querySelector('rect').setAttribute('stroke','var(--pg)');
+    if(i>0) document.getElementById(edges[i-1]).classList.add('lit');
+    await sleep(360);
+  }
+}
+document.querySelectorAll('[data-pg]').forEach(b=>b.addEventListener('click',()=>{
+  const op=b.dataset.pg;
+  if(op==='point')pgPoint(); else if(op==='scan')pgScan();
+  else if(op==='btree')btreeDescend(); else {pgResetCells();pgVerdict.className='verdict';pgVerdict.textContent='Cleared. Run an operation.';}
+}));
+
+// ---------- CLICKHOUSE: column-major grid ----------
+const chGrid = document.getElementById('ch-grid');
+const chRead = document.getElementById('ch-read');
+const chVerdict = document.getElementById('ch-verdict');
+const chStrips = []; // [col] -> array of cells
+function buildCh(){
+  COLS.forEach((c,ci)=>{
+    const strip=document.createElement('div');
+    strip.className='colstrip';
+    const h=document.createElement('div');
+    h.className='colhdr'+(ci===PAY_IDX?' fat':'');
+    h.textContent=c;
+    strip.appendChild(h);
+    const cells=[];
+    ROWS.forEach((row)=>{
+      const cell=document.createElement('div');
+      cell.className='cell';
+      cell.textContent=row[ci];
+      strip.appendChild(cell);
+      cells.push(cell);
+    });
+    chGrid.appendChild(strip);
+    chStrips.push(cells);
+  });
+}
+buildCh();
+function chReset(){chStrips.flat().forEach(c=>c.className=c.className.replace(/ (read|used|skip|hot|chk)/g,''));
+  chRead.innerHTML='bytes read: <b>0</b> wasted · <span class="u">0</span> used';}
+let chBusy=false;
+async function chScan(){
+  if(chBusy)return; chBusy=true; chReset();
+  chVerdict.className='verdict'; chVerdict.textContent='Scanning SUM(amount) — reading only the amount column…';
+  // dim everything except amount strip
+  chStrips.forEach((s,ci)=>{ if(ci!==AMT_IDX) s.forEach(c=>c.classList.add('skip')); });
+  await sleep(300);
+  for(let r=0;r<chStrips[AMT_IDX].length;r++){
+    chStrips[AMT_IDX][r].classList.add('used');
+    chRead.innerHTML=`bytes read: <b>0</b> wasted · <span class="u">${r+1} amounts</span>`;
+    await sleep(reduce?0:90);
+  }
+  chVerdict.className='verdict show';
+  chVerdict.innerHTML='<span class="big">Only the amount column touched.</span> Payload is never read — it sits in a different place on disk entirely. <span style="color:var(--used)">Same query as Postgres, ~14× less work → 415ms.</span>';
+  chBusy=false;
+}
+async function chPoint(){
+  if(chBusy)return; chBusy=true; chReset();
+  chVerdict.className='verdict'; chVerdict.textContent='Point lookup id = 7 — but there is no per-row index…';
+  // granule = block of rows 5..8 (pretend granule boundary), read whole granule in id strip
+  const gStart=4,gEnd=8; // rows index 4..7 (ids 5..8)
+  chStrips.forEach(s=>s.forEach(c=>c.classList.add('skip')));
+  await sleep(300);
+  // sparse index picks the granule
+  chVerdict.textContent='Sparse index → this granule may hold id 7. Read the whole granule…';
+  for(let r=gStart;r<gEnd;r++){
+    const isTarget = ROWS[r][0]===TARGET_ID;
+    chStrips[0][r].classList.remove('skip');
+    chStrips[0][r].classList.add(isTarget?'used':'read');
+    await sleep(reduce?0:150);
+  }
+  chVerdict.className='verdict show';
+  chVerdict.innerHTML='<span class="big">Read a whole granule to find one row.</span> A "point" lookup scans ~8,192 rows (shown here as a small block). Bounded and cheap — <span style="color:var(--ch)">9.9ms</span> — but never B-tree-sharp. This is the number people mis-predict.';
+  chBusy=false;
+}
+document.querySelectorAll('[data-ch]').forEach(b=>b.addEventListener('click',()=>{
+  const op=b.dataset.ch;
+  if(op==='scan')chScan(); else if(op==='point')chPoint();
+  else {chReset();chVerdict.className='verdict';chVerdict.textContent='Cleared. Run an operation.';}
+}));
+
+// ---------- CASSANDRA: LSM svg ----------
+const cassVerdict=document.getElementById('cass-verdict');
+const g = id => document.getElementById(id);
+let cassBusy=false;
+function show(id,v){g(id).style.opacity=v;}
+function cassReset(){
+  ['w1','w2','w3','sst1','sst2','sst3','merged','flowA','flowB'].forEach(id=>show(id,0));
+  cassVerdict.className='verdict';
+  cassVerdict.textContent='Writes go to memory first — that\'s why they never wait on a disk seek.';
+}
+async function cassWrite(){
+  if(cassBusy)return; cassBusy=true; cassReset();
+  cassVerdict.className='verdict';
+  cassVerdict.textContent='Writes land in the in-memory memtable — instant, no seek…';
+  show('w1',1); await sleep(260); show('w2',1); await sleep(260); show('w3',1); await sleep(400);
+  cassVerdict.textContent='Memtable fills → flushed as one immutable SSTable on disk…';
+  show('flowA',1); await sleep(300); show('sst1',1); await sleep(500);
+  show('sst2',1); await sleep(300); show('sst3',1); await sleep(500);
+  cassVerdict.textContent='Later, compaction merges the SSTables in the background…';
+  show('flowB',1); await sleep(400); show('merged',1); await sleep(400);
+  cassVerdict.className='verdict show';
+  cassVerdict.innerHTML='<span class="big">Writes never seek.</span> The disk only ever does sequential appends; the merge cost is paid later, off the write path. <span style="color:var(--cass)">That\'s the ~7,200 writes/sec.</span>';
+  cassBusy=false;
+}
+async function cassPoint(){
+  if(cassBusy)return; cassBusy=true; cassReset();
+  show('sst1',1);show('sst2',1);show('sst3',1);
+  cassVerdict.className='verdict';
+  cassVerdict.textContent='hash(id=7) → routes straight to the partition\'s location…';
+  await sleep(600);
+  g('sst3').querySelector('rect').setAttribute('stroke','var(--used)');
+  g('sst3').querySelector('rect').setAttribute('fill','#1e3a2f');
+  cassVerdict.className='verdict show';
+  cassVerdict.innerHTML='<span class="big">Straight to the partition.</span> No tree walk — a hash jumps to where the key lives. Read-by-partition-key is Cassandra\'s home turf: <span style="color:var(--cass)">3.56ms</span>.';
+  await sleep(50);
+  cassBusy=false;
+}
+async function cassCross(){
+  if(cassBusy)return; cassBusy=true; cassReset();
+  show('sst1',1);show('sst2',1);show('sst3',1);
+  cassVerdict.className='verdict';
+  cassVerdict.textContent='WHERE user_id = X — but user_id isn\'t the partition key. Where do we jump?';
+  await sleep(700);
+  for(const id of ['sst1','sst2','sst3']){
+    g(id).querySelector('rect').setAttribute('stroke','var(--waste)');
+    await sleep(280);
+  }
+  cassVerdict.className='verdict show';
+  cassVerdict.innerHTML='<span class="big">Nowhere to jump.</span> The hash only works for the partition key. To find user_id, Cassandra would touch every partition — so it <span style="color:var(--waste)">refuses (or errors)</span> rather than degrade. No slow mode. You\'d build a second table keyed by user_id instead.';
+  cassBusy=false;
+}
+document.querySelectorAll('[data-cass]').forEach(b=>b.addEventListener('click',()=>{
+  const op=b.dataset.cass;
+  if(op==='write')cassWrite(); else if(op==='point')cassPoint();
+  else if(op==='cross')cassCross(); else cassReset();
+}));
+cassReset();
+</script>
+</body>
+</html>
