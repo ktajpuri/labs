@@ -1,0 +1,41 @@
+# Why storage layout determines the workload shape an engine survives
+
+## Observable claim (from the scope contract)
+
+With identical data (20M rows, same schema, same values) loaded into Postgres, ClickHouse, and Cassandra, identical workloads produce orders-of-magnitude different behavior depending on storage layout — and each engine has a workload shape that visibly breaks it.
+
+## What the experiments showed
+
+| # | scenario | prediction (verbatim) | observed | verdict | takeaway |
+|---|---|---|---|---|---|
+| 1 | Point lookup by id, 1000x | "cassandra <1ms, postgress < 5ms , clickhouse < 100ms" | Postgres 1.37ms < Cassandra 3.56ms < ClickHouse 9.90ms | ✗ | Cassandra's coordination machinery (consistency-level bookkeeping, CQL framing, possible multi-SSTable reads from a bulk load) is pure overhead on a single node with nothing to coordinate with. Postgres's B-tree is purpose-built for exactly this query shape. |
+| 2 | Full-table aggregate (`SUM(amount) GROUP BY event_type`) | "clickhouse ~10ms, postgress ~100ms, cassandra ~5s. clickhouse 10X faster than postgres, cassandra 500X slower than CH" | Postgres 5,871ms, ClickHouse 415ms (~14x), Cassandra 252,058ms (~608x slower than CH, client-side full scan — CQL can't `GROUP BY` a non-key column at all) | ◑ | Ratio direction was right but every absolute number was underestimated by 40-500x. The real ClickHouse margin (14x) came in well under the contract's own ">50x" hypothesis — this schema's "wasted bytes per row" ratio is modest (~5-10x, not 50x+), and Postgres leans on page cache + automatic parallel sequential scan to close part of the gap. |
+| 3 | Sustained random-key write throughput, 60s/8 workers | "cassandra fastest, postgress in between, clickhouse slowest" (mechanism explicitly deferred — knowledge gap) | Cassandra ~7,180/s > Postgres 6,726/s > ClickHouse 231-397/s, zero errors | ✓ | ClickHouse's failure mode isn't a crash or a formal "too many parts" throttle — live polling showed active part count peak at 38 then settle to a steady 10, meaning background merges kept pace the whole time. The real cost is the fixed per-insert overhead (HTTP round trip + part creation + fsync) paid once per row instead of amortized across a batch. |
+| 4 | Filter on non-key `user_id` | "postgress index 100x faster than no index. Clickhouse is slowest." + Cassandra: knowledge gap | Postgres no-index 6,692ms → indexed 100.2ms (cold)/4.0ms (warm); ClickHouse 477.6ms (**middle**, not slowest); Cassandra `ALLOW FILTERING` **failed outright** (server failure, not just slow) | ◑ | Index speedup ratio is cache-state-dependent (67x cold vs 1,673x warm — a 25x swing). ClickHouse beat un-indexed Postgres by the same ~14x margin seen in scenario 2 (same columnar-scan mechanism). Cassandra's per-partition design has no degraded mode for cross-partition scans on ~20M single-row partitions — it fails rather than crawls. |
+| 5 | Memory-capped aggregate (512MB, zero swap) | "clickhouse will be 10X faster than pg" (implicitly: both stay functional) | Postgres stayed functional and stable across 3 repeated runs (~4,000-4,500ms, even faster than its uncapped baseline); ClickHouse OOM-crashed once at 512MB, then ran fine on a later run at the identical, confirmed-still-512MB cap | ✗ | Under-provisioning doesn't hit row and column stores symmetrically. Postgres degrades gracefully — small default `shared_buffers`, spills sort/merge to disk. ClickHouse assumes a generous baseline memory budget for its own internal machinery (caches, background merge threads) independent of any single query's data footprint, and can OOM near that floor — non-deterministically, not as a hard reliable wall. |
+| 6 | Control: ClickHouse point lookup via `ORDER BY` key | "bloom filter search for a granule" | Sparse primary index (one entry per 8192-row granule, binary-searchable) locates the granule; the full granule is decompressed and linearly scanned for the exact row | ◑ | Right unit of work (granule), wrong mechanism — no bloom filter exists in this schema. Sparse indexing explains why ClickHouse's point lookup (9.9ms) is neither B-tree-fast nor full-scan-slow: bounded work per lookup, but never an exact jump to the row. |
+
+## The 2-3 sentences to reproduce cold in an interview
+
+Storage layout determines which workload shape an engine survives: a B-tree row store (Postgres) wins point lookups and gracefully tolerates memory pressure by spilling to disk, but pays for every column it doesn't need on a full scan because it must read whole rows off the heap. A columnar store (ClickHouse) wins full-table aggregates by only touching the columns a query needs and turns single-row lookups into a bounded granule scan via a sparse index rather than a full scan — but it assumes a generous baseline memory budget for its own internal machinery and can OOM outright when that assumption is violated, and it is actively hostile to row-by-row writes because every insert pays a fixed part-creation cost that only amortizes across a batch. A partition-key-addressed LSM store (Cassandra) wins sustained high-throughput random-key writes and single-partition point lookups, but its coordination overhead is dead weight on a lone node, and any cross-partition query (aggregates, filtering on a non-key column) has no degraded mode — it fails outright past a certain scale rather than slowing down. The flip trigger in every case is the same: does the query need exactly the data the storage layout was organized around, or does it cut across the grain?
+
+## Parking lot (adjacent gaps surfaced, not chased this session)
+
+- **Instrumentation affects the experiment.** The second ClickHouse write-throughput run (231/s) measured slower than the first (397/s) — almost certainly the `system.parts` polling loop itself competing for the container's CPU. Worth remembering that watching a system changes it.
+- **`docker update --memory=0` is unreliable for removing a previously-set cgroup limit.** Confirmed twice — once as an apparent ordering race that OOM-killed ClickHouse mid-transition, once as a flat no-op on Postgres (limit still read 512MB after re-running the "uncap" command with no error). The reliable fix was recreating the container fresh via `docker compose up -d --force-recreate <service>`, since the compose file itself never sets a memory limit. This is an operational Docker gotcha, not a storage-engine lesson, but worth remembering for any future memory-capping experiment.
+- **ClickHouse's OOM threshold at 512MB is non-deterministic**, not a hard wall — it crashed once and then ran fine at the identical confirmed cap on a subsequent run. Understanding exactly what internal state (merge activity, connection buffering, mark cache warmup) tips it over would need more controlled repetition than this session did — a candidate for a dedicated resource-limits lab.
+- **Postgres got measurably faster under the 512MB cap than its uncapped baseline**, repeatably across 3 runs. Never fully explained — candidate mechanisms (planner behavior change, cache eviction of unrelated data freeing up relevant working set, general run-to-run variance) were named but not isolated. Left open rather than forced into a conclusion.
+- **Partition skew / scaling streaming aggregation** — queued from the prior streaming-agg-lab session, still outstanding, unrelated to this lab.
+
+## Prediction scorecard
+
+**1 correct / 3 partial / 2 wrong, out of 6.**
+
+- ✓ Scenario 3 (write throughput ranking)
+- ◑ Scenario 2 (aggregate — ratio direction right, magnitude badly underestimated across the board)
+- ◑ Scenario 4 (filter non-key — Postgres index ratio right order of magnitude but cache-state-dependent; ClickHouse call wrong — predicted slowest, landed in the middle)
+- ◑ Scenario 6 (control — right unit of work, wrong mechanism)
+- ✗ Scenario 1 (point lookup ranking flipped — Cassandra predicted fastest, came in second)
+- ✗ Scenario 5 (memory cap — predicted graceful degradation with ClickHouse keeping its edge; ClickHouse actually crashed, Postgres tolerated it better)
+
+Both misses were ranking/direction errors on Cassandra and ClickHouse specifically — worth noting as a pattern: intuitions about Postgres's behavior were consistently closer to correct than intuitions about the other two engines' failure/degradation modes.

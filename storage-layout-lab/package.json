@@ -1,0 +1,22 @@
+{
+  "name": "storage-layout-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Postgres vs ClickHouse vs Cassandra storage-layout failure lab",
+  "scripts": {
+    "generate": "node scripts/generate.js",
+    "load": "node scripts/load.js",
+    "verify": "node scripts/verify.js",
+    "reset": "node scripts/reset.js",
+    "workload:point-lookup": "node workloads/point-lookup.js",
+    "workload:aggregate": "node workloads/aggregate.js",
+    "workload:write-throughput": "node workloads/write-throughput.js",
+    "workload:filter-nonkey": "node workloads/filter-nonkey.js"
+  },
+  "dependencies": {
+    "@clickhouse/client": "^1.7.0",
+    "cassandra-driver": "^4.7.2",
+    "pg": "^8.13.0",
+    "pg-copy-streams": "^6.0.6"
+  }
+}

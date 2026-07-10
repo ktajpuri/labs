@@ -52,3 +52,7 @@ env/
 tmp/
 temp/
 .cache/
+
+# Lab-generated data
+storage-layout-lab/data/*.ndjson
+storage-layout-lab/data/meta.json
