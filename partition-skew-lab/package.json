@@ -1,0 +1,17 @@
+{
+  "name": "partition-skew-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kafka partition skew and consumer-scaling-ceiling failure lab",
+  "scripts": {
+    "topic:create": "node scripts/topic.js create --partitions 4",
+    "topic:grow": "node scripts/topic.js grow --partitions 8",
+    "topic:describe": "node scripts/topic.js describe",
+    "produce": "KAFKAJS_NO_PARTITIONER_WARNING=1 node producer/produce.js",
+    "consume": "KAFKAJS_NO_PARTITIONER_WARNING=1 node consumer/consume.js",
+    "monitor": "node monitor/lag.js"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4"
+  }
+}

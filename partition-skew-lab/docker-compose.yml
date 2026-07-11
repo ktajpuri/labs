@@ -1,0 +1,36 @@
+name: partition-skew-lab
+
+# Infra tier only: a single Kafka broker (KRaft, no Zookeeper). All Node
+# scripts (producer, consumer, monitor, topic admin) run on the HOST so you
+# can read every line — they connect in via the published port below.
+#
+# This lab deliberately has no stream processor and no sink: the concept
+# (partition skew + consumer scaling ceiling) lives entirely at the
+# Kafka partition / consumer-group layer.
+services:
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: psl-kafka
+    ports:
+      - "29092:29092"          # host-facing listener (Node connects here)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Force explicit topic creation — you run scripts/topic.js yourself,
+      # which is also how scenario 5 (grow partition count) stays deliberate.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
