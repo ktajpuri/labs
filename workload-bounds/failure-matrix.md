@@ -1,0 +1,14 @@
+# workload-bounds — failure matrix
+
+Predictions recorded verbatim before each run. Filled in during the session.
+
+| # | Scenario | Prediction (verbatim) | Observed | Verdict | Takeaway |
+|---|----------|----------------------|----------|---------|----------|
+| 1 | CPU-bound baseline (tight hash loop, all cores) | "1. 100% 2. sy 0 wa 0 3. 0" (us 100, sy 0, wa 0, r 0) | us=100, sy=0, wa=0, r=8 steady for entire burn | ◑ partial | `r` counts RUNNABLE (running + queued), not just queued — r≈cores = saturated, r≫cores = contention |
+| 2 | Disk-IO-bound (4K writes + fsync-per-write on real volume) | "1. 5 2. 90 3. 100% 4. 100s, the hardware write capacity limits it" (us 5, wa 90, %util 100, ~100s writes/sec) | us≈0, wa≈10, %util 70–79, ~2100 writes/sec (fsync ≈0.5ms); b=1, f/s≈4300, 6× write amplification (8.7 app MB/s → 50 device MB/s) | ✗ | wa is % of TOTAL cpu → capped at blocked-threads/cores (1/8≈12.5%); disk-bound = b>0 + busy device + us≈0, NOT big wa |
+| 3 | CONTROL: same writes, no fsync (page cache) | "1. ~21000 2. us 0 wa 4 3. periodic bursts 4. memory is the limiting one as writes are persisiting in memory" | Rate sawtooth 35k↔1.26M w/s (one sample: 28!), avg ~100s of k; us≈0 ✓; wa 0→30-37 late (writer + kworker flushers blocked, b=3); vda 126–500 MB/s writeback, aqu-sz 100s, w_await 1–2s | ◑ partial | Page cache absorbs bursts but dirty_ratio throttling (balance_dirty_pages) re-imposes disk speed → sawtooth; sustained avg is STILL disk-bound, memory only sets burst length |
+| 4 | Memory-capacity-bound (768 MB working set, 512 MB limit + 512 MB swap) | "1. manages with RAM + swap, older touches are swapped 2. tens-of-thousands KB/s 3. 1m+ 4. sy 50" | Survived+thrashed ✓; si/so 26–38k KB/s sustained ✓ (swpd ~270MB); touches ~20–30k/sec (not 1M+); CPU: us 0, sy 1–2, id 88, wa 10–11; bi/bo mirrored si/so | ◑ partial | Major fault = sleep on a disk read → thrash converts memory ops to disk ops (swap IS disk); rate dies 40×, time lands in wa (capped 12.5%) not sy; predictions 2+3 were mutually exclusive |
+| 5 | Network-bound (iperf3 through 200 mbit tc cap) | "1. 200 mbit/s 2. sy 100 3. silent" | 190 Mbit/s flat, 0 retr; vmstat us 0–2, sy 0–2, id 99–100, wa 0; disk silent | ◑ partial | Waiting on network = plain idle (wa is disk-only); network-bound is the INVISIBLE bound — diagnose by elimination + network-side metrics |
+| 6 | CONFIG-BOUNDARY FLIP: fsync writes on tmpfs | — (skipped: session ended before prediction) | not run | ⏭ skipped | Expected lesson (unverified): tmpfs has no block device → fsync is ~free → same code becomes single-core CPU/syscall-bound; rerun later to confirm |
+
+Scorecard: 0 ✓ / 4 ◑ / 1 ✗ over 5 run (1 skipped). Directional reads mostly right; magnitudes and CPU-column attribution were the systematic misses (wa arithmetic, sy vs blocked-time).

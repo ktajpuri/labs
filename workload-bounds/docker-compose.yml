@@ -1,0 +1,52 @@
+# workload-bounds lab — one container per workload type + a privileged observer.
+# All containers share one image (python + sysstat/htop/iperf3/iftop).
+#
+# Key facts for observation:
+#   - /proc/stat, /proc/vmstat, /proc/diskstats are NOT namespaced, so vmstat and
+#     iostat run from ANY container report the whole Docker Desktop Linux VM.
+#   - htop needs pid:host to see all VM processes -> that's what `observer` is for.
+
+services:
+  observer:
+    build: .
+    pid: host          # htop sees every process in the VM
+    privileged: true
+    command: sleep infinity
+
+  cpu:
+    build: .
+    command: sleep infinity
+    volumes:
+      - ./workloads:/workloads:ro
+
+  disk:
+    build: .
+    command: sleep infinity
+    volumes:
+      - ./workloads:/workloads:ro
+      - scratch:/data              # named volume = real ext4 file on the VM's block device
+    tmpfs:
+      - /ramdata:size=1200m        # scenario 6: same code, file on RAM
+
+  mem:
+    build: .
+    command: sleep infinity
+    volumes:
+      - ./workloads:/workloads:ro
+    mem_limit: 512m                # working set will exceed this
+    memswap_limit: 1g              # mem+swap cap: 512m of swap headroom before OOM
+
+  net-server:
+    build: .
+    command: iperf3 -s
+
+  net-client:
+    build: .
+    command: sleep infinity
+    cap_add:
+      - NET_ADMIN                  # needed for tc rate-limit (creates the "link" to saturate)
+    volumes:
+      - ./workloads:/workloads:ro
+
+volumes:
+  scratch:
