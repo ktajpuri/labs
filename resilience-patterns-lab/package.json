@@ -1,0 +1,8 @@
+{
+  "name": "resilience-patterns-lab",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "prom-client": "^15.1.3"
+  }
+}

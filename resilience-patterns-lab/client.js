@@ -1,6 +1,7 @@
 'use strict';
 const http = require('http');
 const { URL } = require('url');
+const client = require('prom-client');
 
 function parseArgs(argv) {
   const out = {};
@@ -32,12 +33,55 @@ const cfg = {
   breakerWindow: Number(args['breaker-window'] || 20),
   breakerOpenMs: Number(args['breaker-open-ms'] || 5000),
   breakerHalfOpenProbes: Number(args['breaker-half-open-probes'] || 1),
+  metricsPort: Number(args['metrics-port'] || 9464),
 };
 
 console.log('client config:', cfg);
 
 const target = new URL(cfg.url);
 const agent = new http.Agent({ keepAlive: true, maxSockets: cfg.concurrency });
+
+// ---- prometheus metrics ----
+const registry = new client.Registry();
+client.collectDefaultMetrics({ register: registry });
+
+const metricRequestsTotal = new client.Counter({
+  name: 'client_requests_total',
+  help: 'Completed attempts by outcome',
+  labelNames: ['outcome'], // success | fail | timeout | shed | breaker_rejected
+  registers: [registry],
+});
+const metricRetriesTotal = new client.Counter({
+  name: 'client_retries_total',
+  help: 'Retry attempts issued',
+  registers: [registry],
+});
+const metricRequestDuration = new client.Histogram({
+  name: 'client_request_duration_ms',
+  help: 'Per-attempt request latency in ms',
+  buckets: [5, 10, 20, 35, 50, 75, 100, 200, 350, 500, 750, 1000, 2000, 5000],
+  registers: [registry],
+});
+const metricBreakerState = new client.Gauge({
+  name: 'client_breaker_state',
+  help: 'Circuit breaker state: 0=CLOSED, 1=HALF_OPEN, 2=OPEN',
+  registers: [registry],
+});
+
+const metricsServer = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/metrics') {
+    registry.metrics().then((body) => {
+      res.writeHead(200, { 'Content-Type': registry.contentType });
+      res.end(body);
+    });
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+metricsServer.listen(cfg.metricsPort, () => {
+  console.log(`client metrics listening on :${cfg.metricsPort}/metrics`);
+});
 
 // ---- per-interval stats (reset every reporting tick) ----
 let stats = { sent: 0, success: 0, fail: 0, timedOut: 0, retried: 0, shed: 0, breakerRejected: 0 };
@@ -49,15 +93,21 @@ let breakerOpenedAt = 0;
 let breakerWindowResults = []; // rolling booleans, true = success
 let halfOpenProbesInFlight = 0;
 
+const BREAKER_STATE_VALUE = { CLOSED: 0, HALF_OPEN: 1, OPEN: 2 };
+function setBreakerState(next) {
+  breakerState = next;
+  metricBreakerState.set(BREAKER_STATE_VALUE[next]);
+}
+
 function recordBreakerResult(success) {
   if (cfg.breaker !== 'on') return;
   if (breakerState === 'HALF_OPEN') {
     if (success) {
-      breakerState = 'CLOSED';
+      setBreakerState('CLOSED');
       breakerWindowResults = [];
       halfOpenProbesInFlight = 0;
     } else {
-      breakerState = 'OPEN';
+      setBreakerState('OPEN');
       breakerOpenedAt = Date.now();
       halfOpenProbesInFlight = 0;
     }
@@ -69,7 +119,7 @@ function recordBreakerResult(success) {
     const failures = breakerWindowResults.filter((r) => !r).length;
     const errorRate = failures / breakerWindowResults.length;
     if (errorRate >= cfg.breakerThreshold) {
-      breakerState = 'OPEN';
+      setBreakerState('OPEN');
       breakerOpenedAt = Date.now();
     }
   }
@@ -79,7 +129,7 @@ function breakerGate() {
   if (cfg.breaker !== 'on') return 'PASS';
   if (breakerState === 'OPEN') {
     if (Date.now() - breakerOpenedAt >= cfg.breakerOpenMs) {
-      breakerState = 'HALF_OPEN';
+      setBreakerState('HALF_OPEN');
       halfOpenProbesInFlight = 0;
     } else {
       return 'REJECT';
@@ -145,6 +195,7 @@ async function attemptOnce(attempt) {
   if (gate === 'REJECT') {
     stats.breakerRejected++;
     stats.fail++;
+    metricRequestsTotal.inc({ outcome: 'breaker_rejected' });
     return;
   }
 
@@ -152,19 +203,32 @@ async function attemptOnce(attempt) {
   const start = Date.now();
   try {
     await doHttpRequest();
-    latencies.push(Date.now() - start);
+    const durationMs = Date.now() - start;
+    latencies.push(durationMs);
+    metricRequestDuration.observe(durationMs);
     stats.success++;
+    metricRequestsTotal.inc({ outcome: 'success' });
     recordBreakerResult(true);
   } catch (err) {
-    latencies.push(Date.now() - start);
+    const durationMs = Date.now() - start;
+    latencies.push(durationMs);
+    metricRequestDuration.observe(durationMs);
     const type = (err && err.type) || 'error';
-    if (type === 'timeout') stats.timedOut++;
-    else if (type === 'shed') stats.shed++;
-    else stats.fail++;
+    if (type === 'timeout') {
+      stats.timedOut++;
+      metricRequestsTotal.inc({ outcome: 'timeout' });
+    } else if (type === 'shed') {
+      stats.shed++;
+      metricRequestsTotal.inc({ outcome: 'shed' });
+    } else {
+      stats.fail++;
+      metricRequestsTotal.inc({ outcome: 'fail' });
+    }
     recordBreakerResult(false);
 
     if (attempt <= cfg.retries) {
       stats.retried++;
+      metricRetriesTotal.inc();
       const delay = computeBackoff(attempt);
       if (delay > 0) await sleep(delay);
       return attemptOnce(attempt + 1);

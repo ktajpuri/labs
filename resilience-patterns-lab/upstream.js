@@ -1,5 +1,27 @@
 'use strict';
 const http = require('http');
+const client = require('prom-client');
+
+// ---- prometheus metrics ----
+const register = new client.Registry();
+client.collectDefaultMetrics({ register });
+
+const metricRequestsTotal = new client.Counter({
+  name: 'upstream_requests_total',
+  help: 'Requests to /work by outcome',
+  labelNames: ['outcome'], // received | completed | errored | shed | hung
+  registers: [register],
+});
+const metricActiveRequests = new client.Gauge({
+  name: 'upstream_active_requests',
+  help: 'Requests currently holding a concurrency slot',
+  registers: [register],
+});
+const metricQueueDepth = new client.Gauge({
+  name: 'upstream_queue_depth',
+  help: 'Requests waiting for a free slot (shedMode=queue only)',
+  registers: [register],
+});
 
 // ---- injectable behavior, changed via POST /admin/config ----
 let config = {
@@ -27,20 +49,26 @@ const waiters = []; // resolve functions waiting for a free slot when shedMode =
 function acquireSlot() {
   if (activeCount < config.concurrencyCap) {
     activeCount++;
+    metricActiveRequests.set(activeCount);
     return Promise.resolve(true);
   }
   if (config.shedMode === 'shed') {
     counters.shed++;
+    metricRequestsTotal.inc({ outcome: 'shed' });
     return Promise.resolve(false);
   }
+  metricQueueDepth.set(waiters.length + 1);
   return new Promise((resolve) => waiters.push(resolve));
 }
 
 function releaseSlot() {
   activeCount--;
+  metricActiveRequests.set(activeCount);
   const next = waiters.shift();
   if (next) {
     activeCount++;
+    metricActiveRequests.set(activeCount);
+    metricQueueDepth.set(waiters.length);
     next(true);
   }
 }
@@ -80,8 +108,17 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/metrics') {
+    register.metrics().then((body) => {
+      res.writeHead(200, { 'Content-Type': register.contentType });
+      res.end(body);
+    });
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/work') {
     counters.received++;
+    metricRequestsTotal.inc({ outcome: 'received' });
     let responded = false;
 
     const finish = (statusCode, body, extraHeaders) => {
@@ -118,6 +155,7 @@ const server = http.createServer((req, res) => {
         req.__hanging = true;
         counters.hungActive++;
         counters.hungTotal++;
+        metricRequestsTotal.inc({ outcome: 'hung' });
         return; // accept-then-stall: never respond, never release the slot ourselves
       }
 
@@ -130,9 +168,11 @@ const server = http.createServer((req, res) => {
         releaseSlot();
         if (isError) {
           counters.errored++;
+          metricRequestsTotal.inc({ outcome: 'errored' });
           finish(500, 'upstream error');
         } else {
           counters.completed++;
+          metricRequestsTotal.inc({ outcome: 'completed' });
           finish(200, 'ok');
         }
       }, delay);

@@ -1,0 +1,112 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "2s",
+  "schemaVersion": 39,
+  "tags": ["resilience-patterns-lab"],
+  "time": { "from": "now-5m", "to": "now" },
+  "timezone": "utc",
+  "title": "Resilience Patterns (live)",
+  "uid": "resilience-patterns",
+  "version": 2,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Client request outcomes (rate/sec)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 15, "showPoints": "never", "stacking": { "mode": "normal" } }, "unit": "reqps" },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+          "expr": "sum by (outcome) (rate(client_requests_total[15s]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Client latency p50 / p75 / p99 (ms) — SLA warn 100ms, breach 250ms",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0, "showPoints": "never", "thresholdsStyle": { "mode": "dashed" } },
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 100 },
+              { "color": "red", "value": 250 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(client_request_duration_ms_bucket[15s])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+          "expr": "histogram_quantile(0.75, sum by (le) (rate(client_request_duration_ms_bucket[15s])))",
+          "legendFormat": "p75"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(client_request_duration_ms_bucket[15s])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Error rate % — SLA warn 5%, breach 10%",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 25, "showPoints": "never", "thresholdsStyle": { "mode": "area" } },
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+          "expr": "100 * sum(rate(client_requests_total{outcome=~\"fail|timeout|shed|breaker_rejected\"}[15s])) / sum(rate(client_requests_total[15s]))",
+          "legendFormat": "error rate %"
+        }
+      ]
+    }
+  ]
+}

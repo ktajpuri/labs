@@ -10,13 +10,43 @@ in `client.js` so it can be read and interrogated directly.
 
 - `upstream.js` — plain Node HTTP server. Behavior (latency, latency spikes,
   hangs, error rate, concurrency cap, shed-vs-queue) is set live via an admin
-  endpoint, no restart needed.
+  endpoint, no restart needed. Exposes Prometheus metrics at `:4000/metrics`.
 - `client.js` — load driver. Fires requests at a configurable open-loop rate
   and prints per-second counters: `sent success fail timedOut retried shed
-  breakerRejected breaker p50 p99`.
+  breakerRejected breaker p50 p99`. Exposes the same data as Prometheus
+  metrics on its own small server, default `:9464/metrics`.
 
-No dependencies, no build step. Requires Node 18+ (built-in `http` module
-only).
+Requires Node 18+. One dependency, `prom-client`, used only for metrics —
+`npm install` once. Retry/backoff/jitter/breaker logic is still hand-written
+in `client.js`, no resilience libraries.
+
+## Metrics + dashboard (Prometheus/Grafana)
+
+Bring up the observability stack (infra only — `upstream.js`/`client.js` still
+run on the host, same as always):
+
+```
+docker compose up -d
+```
+
+- Prometheus: http://localhost:9090 (scrapes `upstream.js` on `:4000` and
+  `client.js` on `:9464`, every 2s)
+- Grafana: http://localhost:3000 (anonymous admin, no login) — dashboard
+  **"Resilience Patterns (live)"** is auto-provisioned with two panels:
+  1. **Client request outcomes (rate/sec)** — `client_requests_total` by
+     `outcome` (success/fail/timeout/shed/breaker_rejected), stacked.
+  2. **Client latency p50/p99 (ms)** — from the `client_request_duration_ms`
+     histogram.
+
+Metrics only flow while `client.js` is actively running a load (it's a
+short-lived process per invocation, not a daemon) — start a run before
+checking the dashboard. `upstream.js` metrics are live for as long as the
+server is up. Both `/metrics` endpoints are also queryable directly for
+ad-hoc checks, e.g. `upstream_requests_total{outcome="received"}` is the
+right series to watch for mini-lab 3's "upstream traffic flatlines when the
+breaker is open" claim, even though it isn't one of the two fixed panels.
+
+Tear down with `docker compose down`.
 
 ## Start
 
@@ -90,6 +120,7 @@ unless a scenario explicitly says otherwise.
 --breaker-window             rolling requests considered            default 20
 --breaker-open-ms            time OPEN before a half-open probe     default 5000
 --breaker-half-open-probes   concurrent probes allowed in HALF_OPEN default 1
+--metrics-port                port for the /metrics endpoint          default 9464
 ```
 
 ## upstream.js admin config fields
