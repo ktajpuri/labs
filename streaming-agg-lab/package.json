@@ -10,7 +10,10 @@
     "blast": "KAFKAJS_NO_PARTITIONER_WARNING=1 node producer/blast.js",
     "sink": "KAFKAJS_NO_PARTITIONER_WARNING=1 node sink/consume.js",
     "query": "node query/query.js",
-    "flink-metrics": "node query/flink-metrics.js"
+    "flink-metrics": "node query/flink-metrics.js",
+    "topk:produce": "KAFKAJS_NO_PARTITIONER_WARNING=1 node producer/topk-produce.js",
+    "topk:sink": "KAFKAJS_NO_PARTITIONER_WARNING=1 node sink/topk-sink.js",
+    "topk:query": "node query/topk.js"
   },
   "dependencies": {
     "@clickhouse/client": "^1.7.0",

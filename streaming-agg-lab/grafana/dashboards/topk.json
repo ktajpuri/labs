@@ -1,0 +1,148 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["streaming-agg-lab", "topk"],
+  "time": { "from": "2020-01-01T00:00:00.000Z", "to": "2020-02-15T00:00:00.000Z" },
+  "timezone": "utc",
+  "title": "Top-K Rollup Lab",
+  "uid": "topk-lab",
+  "version": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "window",
+        "type": "custom",
+        "label": "Window",
+        "query": "1m : 1,30m : 30,1h : 60,1d : 1440",
+        "current": { "text": "1h", "value": "60" },
+        "options": [
+          { "text": "1m", "value": "1" },
+          { "text": "30m", "value": "30" },
+          { "text": "1h", "value": "60", "selected": true },
+          { "text": "1d", "value": "1440" }
+        ]
+      },
+      {
+        "name": "k",
+        "type": "textbox",
+        "label": "K",
+        "query": "10",
+        "current": { "text": "10", "value": "10" }
+      },
+      {
+        "name": "retain",
+        "type": "textbox",
+        "label": "Retain (K')",
+        "query": "10",
+        "current": { "text": "10", "value": "10" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Per-minute total events (raw pipeline check — whatever scenario is currently loaded)",
+      "type": "timeseries",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 40 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "rawSql": "SELECT window_start AS time, sum(cnt) AS total_events FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb') GROUP BY time ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "CORRECT top-$k — sum(cnt) over trailing $window, ranked",
+      "type": "table",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+      "gridPos": { "h": 10, "w": 10, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+          "editorType": "sql",
+          "queryType": "table",
+          "rawSql": "WITH bounds AS (SELECT max(window_end) AS end_ts FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb')) SELECT item_id, sum(cnt) AS correct_total FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb') AND window_start >= (SELECT end_ts FROM bounds) - INTERVAL $window MINUTE AND window_start < (SELECT end_ts FROM bounds) GROUP BY item_id ORDER BY correct_total DESC LIMIT $k"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "NAIVE top-$k — merge each minute's own top-$retain, ranked",
+      "type": "table",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+      "gridPos": { "h": 10, "w": 10, "x": 10, "y": 8 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+          "editorType": "sql",
+          "queryType": "table",
+          "rawSql": "WITH bounds AS (SELECT max(window_end) AS end_ts FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb')), minute_ranked AS (SELECT window_start, item_id, cnt, row_number() OVER (PARTITION BY window_start ORDER BY cnt DESC) AS rn FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb') AND window_start >= (SELECT end_ts FROM bounds) - INTERVAL $window MINUTE AND window_start < (SELECT end_ts FROM bounds)) SELECT item_id, sum(cnt) AS naive_total FROM minute_ranked WHERE rn <= $retain GROUP BY item_id ORDER BY naive_total DESC LIMIT $k"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "'sleeper' — correct rank (over trailing $window)",
+      "type": "stat",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+          "editorType": "sql",
+          "queryType": "table",
+          "rawSql": "WITH bounds AS (SELECT max(window_end) AS end_ts FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb')), ranked AS (SELECT item_id, sum(cnt) AS total, row_number() OVER (ORDER BY sum(cnt) DESC) AS rnk FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb') AND window_start >= (SELECT end_ts FROM bounds) - INTERVAL $window MINUTE AND window_start < (SELECT end_ts FROM bounds) GROUP BY item_id) SELECT rnk AS sleeper_correct_rank FROM ranked WHERE item_id = 'sleeper'"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "'sleeper' — NAIVE total (0 = invisible to naive merge)",
+      "type": "stat",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 13 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-lab" },
+          "editorType": "sql",
+          "queryType": "table",
+          "rawSql": "WITH bounds AS (SELECT max(window_end) AS end_ts FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb')), minute_ranked AS (SELECT window_start, item_id, cnt, row_number() OVER (PARTITION BY window_start ORDER BY cnt DESC) AS rn FROM lab.minute_counts WHERE item_id NOT IN ('_flush','_hb') AND window_start >= (SELECT end_ts FROM bounds) - INTERVAL $window MINUTE AND window_start < (SELECT end_ts FROM bounds)) SELECT sum(cnt) AS sleeper_naive_total FROM minute_ranked WHERE rn <= $retain AND item_id = 'sleeper'"
+        }
+      ]
+    }
+  ]
+}
