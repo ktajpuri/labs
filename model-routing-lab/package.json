@@ -1,0 +1,13 @@
+{
+  "name": "model-routing-lab",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Failure lab: tiered model routing escalation-signal reliability",
+  "scripts": {
+    "start": "node --env-file=../.env run.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0"
+  }
+}

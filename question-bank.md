@@ -12,6 +12,50 @@
 
 ---
 
+## model-routing-lab
+
+### [routing-A1]
+- lab: model-routing-lab
+- type: A
+- last_asked: —
+- q: Your cascade escalates on `confidence < threshold`. At threshold=0.5, the local model's one wrong answer in an 8-query set carried confidence exactly 0.5 — and it did NOT escalate; accuracy stayed at 7/8. At threshold=0.7, that same query (still confidence 0.5) DID escalate, accuracy hit 8/8, at a fraction of the cost the threshold=0.9 sweep needed to reach the same accuracy. A teammate proposes standardizing on threshold=0.5 "since it's a real number the model actually produced, unlike an arbitrary round value like 0.7." Drill the decision.
+- ref: The teammate's logic inverts the actual risk: 0.5 is dangerous BECAUSE it's a value the model produces, sitting exactly on the boundary, and the escalation check's strict `<` means any wrong answer parked exactly at the threshold silently fails to escalate — this is a mechanically guaranteed leak, not a probabilistic one. The fix isn't "pick a round number" vs "pick an observed value" — it's recognizing that any threshold equal to a value the model can actually emit is a coin-flip risk at that exact point, and the safer design either uses `<=` or picks a threshold strictly between two observed clusters (0.7 sits cleanly between the model's 0.5-wrong cluster and 0.8/0.9-correct cluster here).
+- grade_note: targets Decision (why "real observed value" is backwards reasoning) + mechanism (strict `<` at an exact-match threshold leaks silently). Miss = endorsing 0.5 as safer because it's "real," or not naming the strict-inequality leak.
+
+### [routing-A2]
+- lab: model-routing-lab
+- type: A
+- last_asked: —
+- q: To catch what confidence misses, the team swaps the escalation signal from self-reported confidence to a structural check PLUS a one-line Haiku plausibility judgment ("does this look like a valid address?"). Your harness measured this "verifier" cascade cost 4x the confidence cascade for IDENTICAL accuracy (8/8 both ways) — two of its three escalations were false positives, cases where the local model was already correct but Haiku rejected it anyway. The team calls this "the more reliable design" and ships it. Drill.
+- ref: The label is wrong — Haiku's one-line plausibility check is not a ground-truth verifier, it's another LLM producing a soft judgment call, the same fallible category as the confidence score it replaced, just relabeled and paid for. The ONLY genuinely reliable half of this design was the structural (regex/schema) check, which caught the one real defect independently of Haiku. "More reliable" requires evidence the added signal catches something the cheaper one missed AND doesn't add net-new false escalations — this run showed the opposite: same catches, worse false-positive rate, 4x cost.
+- grade_note: targets Decision (a second LLM call isn't inherently a verifier) + Tiebreaker (accuracy parity + cost delta is the actual evidence, not the label "verifier"). Miss = accepting "verifier" as inherently more reliable without checking accuracy delta.
+
+### [routing-B1]
+- lab: model-routing-lab
+- type: B
+- last_asked: —
+- q: (Boundary) A local model's self-reported confidence on a golden set clusters tightly at 0.8/0.9 for correct answers and 0.5 for its one wrong answer — a clean separation. Predict what happens to escalation rate and accuracy as the confidence threshold sweeps from 0.5 up through 0.9, and identify where the cost/quality "knee" sits and why.
+- ref: Escalation rate is a step function of the threshold relative to the two clusters, not a smooth curve: at or below 0.5 (given strict `<`), the wrong answer's exact-0.5 confidence fails to trigger escalation at all (0% escalate, accuracy capped at the raw local rate); anywhere strictly above 0.5 up to 0.8, the wrong answer escalates alone (minimal escalation, full accuracy recovered cheaply); pushing above 0.8 additionally escalates every CORRECT answer in that cluster, ballooning cost with zero accuracy gain. The knee sits at the boundary just above the wrong answer's cluster — past it, cost grows linearly for flat accuracy.
+- grade_note: essential = step-function shape (not smooth), the exact-equality leak at the lower boundary, and the knee located just above the wrong-answer cluster. Miss = predicting a smooth accuracy/threshold curve, or missing the boundary leak at the lower end.
+
+### [routing-B2]
+- lab: model-routing-lab
+- type: B
+- last_asked: —
+- q: (Explain-mechanism) A cascade design assumes that when a local model is wrong, its self-reported confidence will tend to be higher than when it's right — the "confidently wrong" failure mode. Explain why a self-reported confidence field from an LLM has no structural reason to correlate with actual correctness at all.
+- ref: The confidence number is produced by the same next-token generation process as every other field in the output — the model isn't consulting an internal, measured uncertainty signal (like token-level output probabilities or an ensemble disagreement score), it's pattern-completing what a plausible-sounding confidence value looks like for a JSON field labeled "confidence," conditioned on how clean or complete the input LOOKS on the surface. A short, clear-looking message can get low confidence for idiosyncratic reasons (as observed: the clearest message in a set scored the lowest confidence) while a genuinely garbled one scores high, because the signal correlates with surface pattern-familiarity, not with ground-truth correctness.
+- grade_note: essential = confidence generated by the same generative process (not a measured/calibrated statistic) + no structural link to correctness. Miss = assuming confidence tracks task difficulty or correctness by default.
+
+### [routing-B3]
+- lab: model-routing-lab
+- type: B
+- last_asked: —
+- q: (Spot-the-flaw) A regex-based intent matcher requires a 5-digit order number AND a keyword like "cancel" or "status" anywhere in the message; it's deployed as "handles the easy 30% of tickets for free." On a multi-issue dispute message that mentions an order number early and the word "status" later in an unrelated sentence, the matcher confidently answers using the WRONG order number and ignores the rest of the message. What's the flaw, and what does the deployment claim get wrong?
+- ref: The matcher has no way to verify that the order number and the keyword it matched are actually about the same sub-topic — it takes the FIRST order number in the text regardless of which clause the trigger keyword appeared in, so on multi-issue text it silently pairs unrelated fragments into a wrong, confident answer. "Handles 30% for free" measured coverage (how often it claims a match) without measuring precision (how often the claim is right) — a lab run showed a 20% false-claim rate among matches, entirely concentrated in non-trivial-tier text that happened to contain an incidental keyword.
+- grade_note: essential = no verification that keyword and order-id are topically linked (first-match, not same-clause) + coverage-without-precision as the deployment-claim flaw. Miss = describing the failure without naming the false-claim/precision gap.
+
+---
+
 ## page-cache-lab
 
 ### [page-cache-A1]
@@ -173,7 +217,7 @@
 ### [resilience-A3]
 - lab: resilience-patterns-lab
 - type: A
-- last_asked: —
+- last_asked: 2026-07-14
 - q: Your breaker harness at rate 20/s (a dispatch every 50 ms) against ~20 ms upstream latency showed `breakerHalfOpenProbes=5` behaving identically to `=1`. The team wants to raise the setting to 10 on a service with the same cadence-vs-latency ratio to "recover faster." Drill.
 - ref: The knob is silently gated by an unrelated variable: `recordBreakerResult` decides state on the FIRST result to arrive in HALF_OPEN, so extra allowed probes only matter if requests genuinely overlap in flight — and at 50 ms dispatch vs ~20 ms latency, the first probe resolves before the second is dispatched, making the setting inert at any value. Probe cadence is set by breakerOpenMs, and recovery is decided by the probe's real outcome, not by probe count.
 - grade_note: targets Untouched (hidden gating variable: request cadence vs upstream latency) + Tiebreaker (what actually controls recovery). Miss = assuming the knob acts as named regardless of relative timing.
@@ -197,7 +241,7 @@
 ### [resilience-B3]
 - lab: resilience-patterns-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-14
 - q: (Explain-mechanism) Circuit breaker: threshold 0.5, window 20, openMs 5000, rate 20/s, against a sustained upstream errorRate=0.6. Describe the long-run state the breaker settles into and the mechanism — then contrast with errorRate=1.0.
 - ref: At 0.6 it settles into a metastable oscillation, not a fixed state: the 5 s timer only re-arms a probe OPPORTUNITY; the probe succeeds with P ≈ 1−errorRate = 0.4, and a success fully re-opens the gate (a CLOSED breaker gates nothing) until the fresh window refills (~window/rate ≈ 1 s) and re-crosses the threshold — so it cycles brief-CLOSED / 5s-OPEN, gated by probe luck. At errorRate=1.0 the probe can never succeed, so the oscillation collapses into a permanently re-tripping OPEN state (harness: one probe every 5 s on the dot, 5 attempts, 5 failures, 0 closes). The timer decides opportunity; the probe outcome decides state.
 - grade_note: essential = oscillation (not a fixed state) at partial failure, probe-as-coin-flip at 1−errorRate, timer≠recovery, permanent-OPEN at 1.0. Miss = "stays open" at 0.6, or crediting the timer with recovery.
@@ -396,4 +440,4 @@
 
 - **streaming-agg-lab/topk** (Top-K rollup sub-lab): harness built and smoke-tested, README and PLAN.md exist, but no WHY.md / failure matrix yet — Phase 2 scenarios haven't been run. No questions generated; add `topk-A*/B*` entries here once its WHY.md lands.
 
-All seven top-level lab folders (page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, storage-layout-lab, streaming-agg-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.
+All eight top-level lab folders (model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, storage-layout-lab, streaming-agg-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.

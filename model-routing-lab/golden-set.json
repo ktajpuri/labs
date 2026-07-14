@@ -1,0 +1,305 @@
+{
+  "_note": "DRAFT for review — not yet approved. Backing fake orders data lives conceptually here: order IDs 10004, 10099, 10234, 10321, 10456, 10567, 10788 exist; 10999 does NOT exist (used to test false-claim / hallucination behavior).",
+  "queries": [
+    {
+      "id": "T01",
+      "tier": "trivial",
+      "text": "Where is my order #10234?",
+      "gold": {
+        "type": "structural",
+        "expected_route": "code_path",
+        "expected_fields": {"order_id": "10234", "intent": "track_order"}
+      }
+    },
+    {
+      "id": "T02",
+      "tier": "trivial",
+      "text": "Cancel order #10567 please",
+      "gold": {
+        "type": "structural",
+        "expected_route": "code_path",
+        "expected_fields": {"order_id": "10567", "intent": "cancel_order"}
+      }
+    },
+    {
+      "id": "T03",
+      "tier": "trivial",
+      "text": "What's the status of order 10099?",
+      "gold": {
+        "type": "structural",
+        "expected_route": "code_path",
+        "expected_fields": {"order_id": "10099", "intent": "track_order"}
+      }
+    },
+    {
+      "id": "T04",
+      "tier": "trivial",
+      "text": "I want to cancel my order 10456 immediately",
+      "gold": {
+        "type": "structural",
+        "expected_route": "code_path",
+        "expected_fields": {"order_id": "10456", "intent": "cancel_order"}
+      }
+    },
+    {
+      "id": "T05",
+      "tier": "trivial",
+      "text": "Can you track package 10321 for me?",
+      "gold": {
+        "type": "structural",
+        "expected_route": "code_path",
+        "expected_fields": {"order_id": "10321", "intent": "track_order"}
+      }
+    },
+    {
+      "id": "T06",
+      "tier": "trivial",
+      "text": "Order #10788 - cancel it",
+      "gold": {
+        "type": "structural",
+        "expected_route": "code_path",
+        "expected_fields": {"order_id": "10788", "intent": "cancel_order"}
+      }
+    },
+    {
+      "id": "T07",
+      "tier": "trivial",
+      "text": "When will order 10004 arrive?",
+      "gold": {
+        "type": "structural",
+        "expected_route": "code_path",
+        "expected_fields": {"order_id": "10004", "intent": "track_order"}
+      }
+    },
+    {
+      "id": "T08",
+      "tier": "trivial",
+      "text": "Please cancel order 10999",
+      "gold": {
+        "type": "structural",
+        "expected_route": "code_path",
+        "expected_fields": {"order_id": "10999", "intent": "cancel_order", "note": "order does not exist — code path should claim it (regex matches) but the correct answer is 'order not found', not a fabricated cancellation"}
+      }
+    },
+    {
+      "id": "S01",
+      "tier": "simple",
+      "text": "Hey so i moved last week and forgot to update, can u change my shipping addr for order 10234 to 55 Maple St Apt 2, Springfield, and also im not sure if that iphone case i ordered will even fit my new phone lol whatever just fix the address",
+      "gold": {
+        "type": "structural",
+        "expected_route": "local_model",
+        "expected_fields": {"order_id": "10234", "intent": "update_address", "new_address": "55 Maple St Apt 2, Springfield"}
+      }
+    },
+    {
+      "id": "S02",
+      "tier": "simple",
+      "text": "please update address on order 10567: 12 Oak Ave, Boston MA 02118",
+      "gold": {
+        "type": "structural",
+        "expected_route": "local_model",
+        "expected_fields": {"order_id": "10567", "intent": "update_address", "new_address": "12 Oak Ave, Boston MA 02118"}
+      }
+    },
+    {
+      "id": "S03",
+      "tier": "simple",
+      "text": "So basically I ordered like 3 things last month or something and I think one of them, the order number is 10099 I think? was supposed to ship to my old place but I moved to 200 Elm Street Denver CO 80202",
+      "gold": {
+        "type": "structural",
+        "expected_route": "local_model",
+        "expected_fields": {"order_id": "10099", "intent": "update_address", "new_address": "200 Elm Street Denver CO 80202"}
+      }
+    },
+    {
+      "id": "S04",
+      "tier": "simple",
+      "text": "change delivery address for 10456 to 78 Pine Rd, Austin TX",
+      "gold": {
+        "type": "structural",
+        "expected_route": "local_model",
+        "expected_fields": {"order_id": "10456", "intent": "update_address", "new_address": "78 Pine Rd, Austin TX"}
+      }
+    },
+    {
+      "id": "S05",
+      "tier": "simple",
+      "text": "hii my package for order 10321 keeps going to my parents house can u switch it to 900 5th Ave New York NY 10021 thanks!!",
+      "gold": {
+        "type": "structural",
+        "expected_route": "local_model",
+        "expected_fields": {"order_id": "10321", "intent": "update_address", "new_address": "900 5th Ave New York NY 10021"}
+      }
+    },
+    {
+      "id": "S06",
+      "tier": "simple",
+      "text": "extract: my name is Sarah Connor phone 555-0142 want to update order 10788 address to 44 Birch Ln Miami FL",
+      "gold": {
+        "type": "structural",
+        "expected_route": "local_model",
+        "expected_fields": {"order_id": "10788", "intent": "update_address", "new_address": "44 Birch Ln Miami FL", "name": "Sarah Connor", "phone": "555-0142"}
+      }
+    },
+    {
+      "id": "S07",
+      "tier": "simple",
+      "text": "not sure how to say this but i think i typo'd my address when ordering 10004, it should be 15 Cedar Ct not 15 Cedar St, Chicago IL",
+      "gold": {
+        "type": "structural",
+        "expected_route": "local_model",
+        "expected_fields": {"order_id": "10004", "intent": "update_address", "new_address": "15 Cedar Ct, Chicago IL"}
+      }
+    },
+    {
+      "id": "S08",
+      "tier": "simple",
+      "text": "Order 10999 - update shipping to 500 Broadway NY",
+      "gold": {
+        "type": "structural",
+        "expected_route": "local_model",
+        "expected_fields": {"order_id": "10999", "intent": "update_address", "note": "order does not exist — correct answer flags 'not found', not a confirmed update"}
+      }
+    },
+    {
+      "id": "M01",
+      "tier": "medium",
+      "text": "I received order 10234 damaged, it's been 10 days since delivery, can I get a refund?",
+      "gold": {
+        "type": "judge",
+        "expected_route": "sonnet",
+        "expected_outcome": "eligible — within standard return window, item damaged on arrival"
+      }
+    },
+    {
+      "id": "M02",
+      "tier": "medium",
+      "text": "Order 10567 was delivered 45 days ago and I just noticed a defect, can I still return it?",
+      "gold": {
+        "type": "judge",
+        "expected_route": "sonnet",
+        "expected_outcome": "not eligible under standard window, but flag manufacturer-defect exception per policy if one exists — ambiguous, judge should check reasoning quality not just yes/no"
+      }
+    },
+    {
+      "id": "M03",
+      "tier": "medium",
+      "text": "I want to return order 10099 - I just don't like the color, is that covered?",
+      "gold": {
+        "type": "judge",
+        "expected_route": "sonnet",
+        "expected_outcome": "eligible for change-of-mind return only if within window and item unused/unopened — policy-dependent, judge checks correct conditional reasoning"
+      }
+    },
+    {
+      "id": "M04",
+      "tier": "medium",
+      "text": "Order 10456 - item was final sale, but arrived broken, refund?",
+      "gold": {
+        "type": "judge",
+        "expected_route": "sonnet",
+        "expected_outcome": "eligible — final-sale exclusions typically don't override defective-item guarantee"
+      }
+    },
+    {
+      "id": "M05",
+      "tier": "medium",
+      "text": "I opened order 10321's box and used the item for a week before deciding I want a refund",
+      "gold": {
+        "type": "judge",
+        "expected_route": "sonnet",
+        "expected_outcome": "not eligible — used/opened item outside change-of-mind terms"
+      }
+    },
+    {
+      "id": "M06",
+      "tier": "medium",
+      "text": "Order 10788 - refund request, digital gift card, unopened",
+      "gold": {
+        "type": "judge",
+        "expected_route": "sonnet",
+        "expected_outcome": "not eligible — gift cards typically non-refundable regardless of opened state"
+      }
+    },
+    {
+      "id": "M07",
+      "tier": "medium",
+      "text": "Order 10004 refund - I lost my receipt/order confirmation, delivered 20 days ago",
+      "gold": {
+        "type": "judge",
+        "expected_route": "sonnet",
+        "expected_outcome": "eligible in principle (within window) but requires alternate verification (email/account lookup) since no receipt — judge checks it doesn't just refuse for lack of receipt"
+      }
+    },
+    {
+      "id": "M08",
+      "tier": "medium",
+      "text": "Order 10999 - want refund but paid via third-party marketplace not directly",
+      "gold": {
+        "type": "judge",
+        "expected_route": "sonnet",
+        "expected_outcome": "order not found in our system — correct answer redirects to marketplace support, not a fabricated refund"
+      }
+    },
+    {
+      "id": "H01",
+      "tier": "hard",
+      "text": "Order 10234 arrived, but wrong item, and when I called about it before nobody helped, and now the return window might be closed, and I also want to cancel order 10567 which hasn't shipped, oh and update my address for future orders to 32 River Rd Portland OR",
+      "gold": {
+        "type": "judge",
+        "expected_route": "opus",
+        "expected_outcome": "must separately handle: (1) wrong-item on 10234 — eligible regardless of window since it's a fulfillment error, (2) cancel 10567 if unshipped, (3) address update for future orders. Judge checks all three are addressed and not conflated."
+      }
+    },
+    {
+      "id": "H02",
+      "tier": "hard",
+      "text": "I was told by chat support I'd get a refund for order 10099 but the email says it's denied, which is right?",
+      "gold": {
+        "type": "judge",
+        "expected_route": "opus",
+        "expected_outcome": "must acknowledge the contradiction, not just pick one source silently, and give a path to resolve (escalate/verify) rather than fabricating a definitive answer"
+      }
+    },
+    {
+      "id": "H03",
+      "tier": "hard",
+      "text": "Order 10456: partial refund issued but I never received item at all, and support ticket says 'resolved' but nothing happened",
+      "gold": {
+        "type": "judge",
+        "expected_route": "opus",
+        "expected_outcome": "must flag the mismatch between 'partial refund for received-but-flawed item' logic and 'never received' claim — these are different policies (non-delivery vs partial defect), judge checks it doesn't conflate them"
+      }
+    },
+    {
+      "id": "H04",
+      "tier": "hard",
+      "text": "I have two orders, 10321 and 10788, both damaged, but 10321 is past the window and 10788 isn't, and I paid with mixed store credit + card so refund method is unclear",
+      "gold": {
+        "type": "judge",
+        "expected_route": "opus",
+        "expected_outcome": "must handle both orders with different eligibility outcomes and address the split-payment refund-method question explicitly, not generically"
+      }
+    },
+    {
+      "id": "H05",
+      "tier": "hard",
+      "text": "My subscription auto-renewed order 10004 but I cancelled it 2 days before renewal via email that may not have been received, need refund and to prevent next month's charge",
+      "gold": {
+        "type": "judge",
+        "expected_route": "opus",
+        "expected_outcome": "must distinguish the past-charge refund question from the future-charge prevention question, and note the uncertainty about whether the cancellation was received rather than assuming either way"
+      }
+    },
+    {
+      "id": "H06",
+      "tier": "hard",
+      "text": "Order 10999 dispute: item was returned per instructions but tracking shows it was never received by warehouse, meanwhile a partial refund already posted - what's the actual status and what should happen next?",
+      "gold": {
+        "type": "judge",
+        "expected_route": "opus",
+        "expected_outcome": "order 10999 doesn't exist in our system — correct answer surfaces that the order ID itself can't be found, rather than reasoning about tracking/refund status for a nonexistent order"
+      }
+    }
+  ]
+}

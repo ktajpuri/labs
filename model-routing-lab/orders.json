@@ -1,0 +1,51 @@
+{
+  "10004": {
+    "status": "delivered",
+    "delivered_days_ago": 20,
+    "shipping_address": "9 Willow Dr, Chicago IL",
+    "items": [{"sku": "SKU-104", "name": "Wireless Mouse", "price": 29.99, "final_sale": false}],
+    "payment_method": "card"
+  },
+  "10099": {
+    "status": "delivered",
+    "delivered_days_ago": 5,
+    "shipping_address": "44 Fir St, Denver CO",
+    "items": [{"sku": "SKU-099", "name": "Desk Lamp", "price": 34.5, "final_sale": false}],
+    "payment_method": "card"
+  },
+  "10234": {
+    "status": "delivered",
+    "delivered_days_ago": 10,
+    "shipping_address": "1 Main St, Springfield IL",
+    "items": [{"sku": "SKU-234", "name": "Phone Case", "price": 19.99, "final_sale": false}],
+    "payment_method": "card"
+  },
+  "10321": {
+    "status": "delivered",
+    "delivered_days_ago": 3,
+    "shipping_address": "77 Cherry Ln, Queens NY",
+    "items": [{"sku": "SKU-321", "name": "Bluetooth Speaker", "price": 49.99, "final_sale": false}],
+    "payment_method": "store_credit+card"
+  },
+  "10456": {
+    "status": "delivered",
+    "delivered_days_ago": 8,
+    "shipping_address": "20 Maple Ave, Dallas TX",
+    "items": [{"sku": "SKU-456", "name": "Clearance Headphones", "price": 15.0, "final_sale": true}],
+    "payment_method": "card"
+  },
+  "10567": {
+    "status": "processing",
+    "delivered_days_ago": null,
+    "shipping_address": "5 Birch Blvd, Seattle WA",
+    "items": [{"sku": "SKU-567", "name": "Keyboard", "price": 59.99, "final_sale": false}],
+    "payment_method": "card"
+  },
+  "10788": {
+    "status": "delivered",
+    "delivered_days_ago": 15,
+    "shipping_address": "310 Elm St, Miami FL",
+    "items": [{"sku": "SKU-788", "name": "Digital Gift Card", "price": 25.0, "final_sale": false, "gift_card": true}],
+    "payment_method": "card"
+  }
+}
