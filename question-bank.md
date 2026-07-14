@@ -30,6 +30,14 @@
 - ref: The label is wrong — Haiku's one-line plausibility check is not a ground-truth verifier, it's another LLM producing a soft judgment call, the same fallible category as the confidence score it replaced, just relabeled and paid for. The ONLY genuinely reliable half of this design was the structural (regex/schema) check, which caught the one real defect independently of Haiku. "More reliable" requires evidence the added signal catches something the cheaper one missed AND doesn't add net-new false escalations — this run showed the opposite: same catches, worse false-positive rate, 4x cost.
 - grade_note: targets Decision (a second LLM call isn't inherently a verifier) + Tiebreaker (accuracy parity + cost delta is the actual evidence, not the label "verifier"). Miss = accepting "verifier" as inherently more reliable without checking accuracy delta.
 
+### [routing-A3]
+- lab: model-routing-lab
+- type: A
+- last_asked: —
+- q: You built a confidence-threshold cascade (escalate below 0.7) and validated it against a 3B local model: 8/8 accuracy after cascade, only 1 escalation. You then swap in a weaker 1B local model — same router code, same threshold, same 8 queries — and rerun. Before looking at the result: does the 8/8 accuracy validation from the 3B run tell you anything about what the 1B run will do?
+- ref: No — the router's accuracy guarantee was never a property of the router code, it was a property of THAT model's confidence happening to discriminate right from wrong on that run. Swapping to the 1B model (same code, same threshold) dropped accuracy to 50%: the weaker model was wrong on 5/8 queries, and 4 of those 5 wrong answers carried the identical confidence (0.8) as its correct answers, so they never crossed the 0.7 threshold and shipped silently. A router's validated accuracy is not transferable across the model it's routing for — it has to be re-validated per model, because the escalation signal's reliability is a property of the model being escalated FROM, not the routing logic itself.
+- grade_note: targets Untouched (accuracy validation doesn't transfer across models) + mechanism (same confidence value on right and wrong answers = the threshold can't discriminate). Miss = assuming router correctness generalizes once validated against one model.
+
 ### [routing-B1]
 - lab: model-routing-lab
 - type: B
@@ -189,7 +197,7 @@
 ### [redis-B3]
 - lab: redis-atomicity-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-14
 - q: (Boundary) Based on the lab's numbers, state the workload condition under which WATCH/MULTI optimistic locking is a reasonable choice, the condition under which it collapses, and the mechanism that separates the two.
 - ref: It's reasonable when conflicts are rare — many keys, low contention — because the abort-and-retry cost scales with collision probability, so aborts stay near zero. It collapses on a single hot key where nearly every EXEC detects a collision: the lab burned ~26K aborted transactions and 25× Lua's latency to reach the identical result. Mechanism: WATCH detects conflicts at EXEC time and retries losers, so total work grows with contention rather than with successful operations.
 - grade_note: essential = contention as the boundary variable + abort/retry mechanism + direction (hot key → retry storm). Miss = no contention-based boundary or wrong mechanism.
@@ -285,7 +293,7 @@
 ### [storage-A3]
 - lab: storage-layout-lab
 - type: A
-- last_asked: —
+- last_asked: 2026-07-14
 - q: Under a 512MB memory cap, your harness saw Postgres run the 20M-row aggregate stably across 3 repeated runs (~4,000–4,500 ms) while ClickHouse OOM-crashed once, then ran fine at the identical, confirmed-still-512MB cap. The team wants to standardize 512MB containers fleet-wide "since both engines passed at least once." Drill.
 - ref: Under-provisioning doesn't hit row and column stores symmetrically. Postgres degrades gracefully — small default shared_buffers, spills sorts/merges to disk. ClickHouse assumes a generous baseline memory budget for its own machinery (caches, background merge threads) independent of any single query's footprint, and near that floor it OOMs non-deterministically — not a hard reliable wall, so one clean run is not evidence of safety. The pass/fail asymmetry, not the pass, is the decision input.
 - grade_note: targets Tiebreaker (graceful-degradation asymmetry between engines) + Number (non-deterministic OOM at the 512MB floor). Miss = treating a single clean run as clearance, or expecting a deterministic threshold.

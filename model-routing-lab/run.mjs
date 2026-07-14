@@ -1,6 +1,6 @@
 import golden from "./golden-set.json" with { type: "json" };
 import { runIntentMatcher } from "./src/intentMatcher.mjs";
-import { runLocalModel } from "./src/localModel.mjs";
+import { runLocalModel, DEFAULT_MODEL } from "./src/localModel.mjs";
 import { callClaude, callClaudeExtraction } from "./src/claude.mjs";
 import { gradeStructural, gradeWithJudge } from "./src/grader.mjs";
 import { runVerifier } from "./src/verifier.mjs";
@@ -92,13 +92,13 @@ async function scenarioS2() {
   );
 }
 
-// ---------- shared cascade core (used by S3 and S7) ----------
-async function runConfidenceCascade(threshold, headerLabel) {
+// ---------- shared cascade core (used by S3, S7, S10) ----------
+async function runConfidenceCascade(threshold, headerLabel, model = DEFAULT_MODEL) {
   printHeader(headerLabel ?? `Confidence cascade (threshold=${threshold})`);
   const rows = [];
   let escalated = 0;
   for (const q of simpleQueries) {
-    const local = await runLocalModel(q.text);
+    const local = await runLocalModel(q.text, model);
     let finalFields = local.fields;
     let route = "local";
     let inputTokens = local.inputTokens;
@@ -144,13 +144,13 @@ async function scenarioS3(threshold = 0.7) {
 }
 
 // ---------- S4 CORE: confidence calibration, local model alone ----------
-async function scenarioS4() {
-  printHeader("S4 CORE: confidence calibration — local model alone, Simple tier, no escalation");
+async function scenarioS4(model = DEFAULT_MODEL, headerLabel) {
+  printHeader(headerLabel ?? "S4 CORE: confidence calibration — local model alone, Simple tier, no escalation");
   const rows = [];
   let wrongCount = 0;
   let confidentlyWrongCount = 0;
   for (const q of simpleQueries) {
-    const local = await runLocalModel(q.text);
+    const local = await runLocalModel(q.text, model);
     const grade = gradeStructural(local.fields, q.gold.expected_fields);
     const isWrong = !grade.correct;
     if (isWrong) wrongCount++;
@@ -264,6 +264,43 @@ async function scenarioS7() {
   }
 }
 
+// ---------- S8: 1B vs 3B control ----------
+async function scenarioS8() {
+  printHeader("S8: Control — 1B vs 3B local model, Simple tier (8 queries)");
+  const rows1b = [];
+  const rows3b = [];
+  for (const q of simpleQueries) {
+    const m1b = await runLocalModel(q.text, "llama3.2:1b");
+    const g1b = gradeStructural(m1b.fields, q.gold.expected_fields);
+    rows1b.push(mkRow(q, "local(1b)", g1b.correct, m1b, `conf=${m1b.confidence} ${g1b.correct ? "" : g1b.details.join("; ")}`));
+
+    const m3b = await runLocalModel(q.text, "llama3.2:3b");
+    const g3b = gradeStructural(m3b.fields, q.gold.expected_fields);
+    rows3b.push(mkRow(q, "local(3b)", g3b.correct, m3b, `conf=${m3b.confidence} ${g3b.correct ? "" : g3b.details.join("; ")}`));
+  }
+  console.log("-- 1B --");
+  rows1b.forEach(printRow);
+  const totals1b = printTotals(rows1b);
+  console.log("-- 3B --");
+  rows3b.forEach(printRow);
+  const totals3b = printTotals(rows3b);
+  console.log(`--- accuracy: 1b ${totals1b.correctCount}/${totals1b.n} vs 3b ${totals3b.correctCount}/${totals3b.n} ---\n`);
+}
+
+// ---------- S9 CORE: confidence calibration with 1B model ----------
+async function scenarioS9() {
+  return scenarioS4("llama3.2:1b", "S9 CORE: confidence calibration — 1B local model alone, Simple tier, no escalation");
+}
+
+// ---------- S10: confidence cascade with 1B model ----------
+async function scenarioS10(threshold = 0.7) {
+  return runConfidenceCascade(
+    threshold,
+    `S10: Cascade with 1B model, self-reported confidence (threshold=${threshold}) — Simple tier`,
+    "llama3.2:1b",
+  );
+}
+
 function mkRow(q, route, correct, r, note) {
   return {
     id: q.id,
@@ -292,6 +329,9 @@ const SCENARIOS = {
   s5: scenarioS5,
   s6: scenarioS6,
   s7: scenarioS7,
+  s8: scenarioS8,
+  s9: scenarioS9,
+  s10: () => scenarioS10(threshold),
 };
 
 const fn = SCENARIOS[scenario];

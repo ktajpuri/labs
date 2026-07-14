@@ -105,3 +105,52 @@ threshold actually produces).
   $0.05–0.15, actual $0.294) because I didn't account for the full policy doc and
   order JSON embedded in every system prompt — worth pre-computing token counts via
   `count_tokens` rather than eyeballing estimates, if a future lab reuses this pattern.
+
+---
+
+## Addendum — 1B follow-up (new contract, same harness, S8–S10)
+
+**Question:** does a genuinely weaker local model produce enough failures to actually
+test whether confidence tracks correctness — the thing the original n=8 golden set,
+paired with a surprisingly capable `llama3.2:3b`, was underpowered to show?
+
+**Yes, decisively.** `llama3.2:1b` failed 5/8 Simple-tier queries (S8), all identically
+on a dropped `order_id` extraction — a systematic weakness, not scattered noise. Of
+those 5 wrong answers, 4 carried confidence 0.8 — indistinguishable from its confidence
+on correct answers (also 0.8). Only 1 wrong answer (0.5) was appropriately unconfident.
+That's real statistical weight (4/5, not 1/1) behind the claim the original lab set out
+to test and couldn't: **at this model's actual failure rate, confidence carries no
+discriminating signal between right and wrong.**
+
+S10 made the consequence concrete rather than abstract: the exact same router code and
+threshold (0.7) that delivered 8/8 accuracy with the 3B model delivered **50%** with the
+1B model — because 4 of 5 wrong answers sat at the same confidence as every correct
+answer and never triggered escalation. Same design, same threshold, opposite outcome,
+determined entirely by whether the underlying model's confidence happens to be
+calibrated. That is the concrete version of "a confidence-threshold router silently
+ships wrong answers" the original contract set out to demonstrate.
+
+**One session-hygiene note, repeated:** I made the identical steady-state-aliasing
+mistake a second time — asked for an S9 prediction on data that was deterministically
+guaranteed to reproduce S8's already-visible output (same queries, same model, temp=0).
+Caught it before running anything paid, logged S9 as void, and pulled the real numbers
+from S8's data directly. Two occurrences in one working session is a pattern, not a
+fluke: **any scenario whose model/query/temperature combination exactly matches a
+scenario already run must be checked for this before a prediction is requested, not
+after.**
+
+### Updated prediction scorecard (S8–S10 only)
+
+| Scenario | Verdict |
+|---|---|
+| S8 | Partial — 3B accuracy exact, 1B accuracy wrong (predicted 5/8, actual 3/8 — overestimated the weaker model, mirroring the original lab's S4 overestimate in the opposite direction) |
+| S9 | No prediction possible (harness sequencing error, not a genuine miss) |
+| S10 | Correct — exact match on both escalation rate and resulting accuracy |
+
+Combined across both contracts in this session: 2 fully correct (S6, S10) / 8 scored
+scenarios, 4 partial, 1 wrong, 2 void. The two exact-correct predictions (S6, S10) share
+a pattern: both were reasoned through analytically from data already on hand rather than
+gut-called — S10 in particular was worked out from S9's confidence values before running
+anything. That's the transferable lesson from this session: predictions built by working
+through the mechanism from known data landed correctly; predictions that were closer to
+intuition (S3, S4, S5, S7, S8's 1B estimate) were the ones that missed.
