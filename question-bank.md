@@ -64,6 +64,58 @@
 
 ---
 
+## oauth-jwt-logout-lab
+
+### [oauthjwt-A1]
+- lab: oauth-jwt-logout-lab
+- type: A
+- last_asked: —
+- q: Your Scenario 2 harness: `RS_CHECK_DENYLIST=false`, logout revoked the token server-side (`accessTokenRevoked: true`), yet replaying the same saved token still returned 200. A teammate proposes "logout doesn't need to touch the server at all — deleting the token client-side is functionally equivalent to server-side revocation, since the user can't use a token they don't have." Drill.
+- ref: This conflates the client's copy of the token with the token's overall validity. Client-side deletion only protects against the same legitimate user's own future accidental reuse — it does nothing against a token already captured elsewhere (browser history, an XSS exfil, a proxy log, a second device, a network capture). The harness demonstrated exactly this: `.tokens/current.json` was deliberately never deleted by `logout`, and the resource server accepted the replay identically to the original holder, because the token itself IS the credential — a second holder of the same bytes is indistinguishable from the first to a stateless verifier. Real revocation requires the resource server to check something outside the token's own bytes.
+- grade_note: targets Decision (client-side deletion defends against forgetting, not theft/replay) + Untouched (a second holder of identical token bytes is authorized identically). Miss = accepting client-side-only logout as sufficient.
+
+### [oauthjwt-A2]
+- lab: oauth-jwt-logout-lab
+- type: A
+- last_asked: —
+- q: Scenario 3's fix (`RS_CHECK_DENYLIST=true`) correctly rejected a token whose jti was on the denylist. The team ships it exactly as built — a Set that only ever grows, one entry added per logout, entries never removed. At scale (millions of logouts/day) they hit unbounded memory growth on the authz server and conclude "we need a bigger box." Drill.
+- ref: More memory treats the symptom, not the bug. A jti only needs to be checked while its token could otherwise still pass the `exp` check on its own — once a token's `exp` has passed, the resource server rejects it on the TTL check alone regardless of denylist state, so retaining that jti forever buys zero additional protection past its own expiry. The fix is a TTL on denylist entries matching (or slightly exceeding, for clock skew) each token's own `exp` — bounding the denylist's size to "logouts within one access-token lifetime," not "all logouts ever." Buying a bigger box ships a scaling workaround for a staleness problem that has a cheap, exact fix.
+- grade_note: targets Ceiling (denylist only needs to cover the token's own remaining TTL window) + Decision (TTL-bound the store vs. scale the hardware). Miss = endorsing "bigger box" as the right first move, or not connecting denylist necessity to the token's own exp.
+
+### [oauthjwt-A3]
+- lab: oauth-jwt-logout-lab
+- type: A
+- last_asked: —
+- q: After Scenario 6, the team sets `RS_PIN_ALG=true` on `resource-server.js` and declares "the JWT algorithm-confusion class of bugs is closed." Using this lab's own Scenario 6 finding, what's the flaw in "closed"?
+- ref: Pinning closes the `alg=none` and HS/RS-confusion paths for this one resource server's code — but algorithm confusion is a two-layer problem: server-side policy (pinning, which is per-service and easy to forget on the next service stood up against the same IdP) and library-level defaults (whether the JWT library itself refuses to treat asymmetric key material as a symmetric secret). This lab's own run showed `jsonwebtoken` has exactly such a guard built in, independent of `RS_PIN_ALG` — proof the attack class is well-known enough that library authors defend against it too. "We pinned it here" is necessary and correct, but it's scoped to one service's config, not a claim about every other consumer of tokens from the same IdP, nor about whether some other team's older library lacks the same guard.
+- grade_note: targets Road Not Taken (defense must exist per-consumer across an org, not just in the one audited service) + mechanism (why a JWT library would add its own independent guard). Miss = treating one server's `RS_PIN_ALG=true` as closing the vulnerability everywhere it could recur.
+
+### [oauthjwt-B1]
+- lab: oauth-jwt-logout-lab
+- type: B
+- last_asked: —
+- q: (Predict) Given `ACCESS_TTL=N` seconds and `RS_LEEWAY=0`, predict at exactly which elapsed second (measured from `iat`) a valid token's status flips from 200 to 401, and name the comparison operator responsible.
+- ref: Flips at t=N, not t=N+1 — the boundary trips the instant N whole seconds have elapsed. `jsonwebtoken`'s expiry check is `clockTimestamp >= exp` (a `>=`, not `>`), and `exp = iat + N`. The lab's own per-second polling loop showed this precisely for N=60: `t+59s → 200`, `t+60s → 401` — the original in-session prediction of "flips at t=61" was off by exactly one second for missing this operator.
+- grade_note: essential = flip at t=N not N+1, and naming the `>=` comparison as the mechanism. Miss = predicting t=N+1, or describing the boundary as gradual/fuzzy rather than a single-second step.
+
+### [oauthjwt-B2]
+- lab: oauth-jwt-logout-lab
+- type: B
+- last_asked: —
+- q: (Explain-mechanism) A resource server verifies a JWT purely by checking its RS256 signature against a cached public key, plus its `aud`/`iss`/`exp` claims — no call to the authz server at request time. Explain why "the user logged out" has zero effect on this check, and name the one thing that would give it an effect.
+- ref: The verification path only inspects the token's own bytes and locally-known claims/keys — "logout" is an action recorded entirely in the authz server's separate state (a denylist entry, a revoked refresh-token family), and nothing in the resource server's check path reads that state, so there is no channel for the logout to reach it. The one thing that gives logout an effect is making the resource server consult server-side state per request — e.g. checking the token's `jti` against a live denylist — which necessarily reintroduces the network dependency the stateless design existed to avoid.
+- grade_note: essential = verification checks only the token's own bytes/claims; logout is separate server-side state never consulted by that path; denylist-check is the only lever connecting the two. Miss = asserting logout "should" invalidate it without naming why the current check path structurally can't see it.
+
+### [oauthjwt-B3]
+- lab: oauth-jwt-logout-lab
+- type: B
+- last_asked: —
+- q: (Spot-the-flaw) A team fixes an `alg=none` vulnerability by pinning `RS_PIN_ALG=true` (always verify with `algorithms:['RS256']`) and declares the JWT algorithm-confusion class of bugs closed, full stop. Using this lab's Scenario 6 result, what's wrong with "closed, full stop"?
+- ref: Pinning closes the `alg=none` and HS-confusion paths for this one resource server's verification code — but it's a service-scoped fix, not an organization-wide guarantee. This lab's own harness found a second, independent layer of defense already present: the `jsonwebtoken` library itself refuses to treat PEM/DER-shaped (asymmetric) key material as an HS-family secret, regardless of `RS_PIN_ALG`. That a mainstream library ships this guard is itself evidence the attack class is common enough to need defense at multiple independent layers — any other consumer of tokens from the same IdP that pins incorrectly, or runs an older library lacking that guard, remains independently exploitable.
+- grade_note: essential = pinning is necessary but service-scoped, not org-wide; library-level defense is a second, independent layer this lab's own run surfaced. Miss = agreeing pinning alone fully closes the vulnerability class everywhere it could recur.
+
+---
+
 ## page-cache-lab
 
 ### [page-cache-A1]
@@ -181,7 +233,7 @@
 ### [redis-B1]
 - lab: redis-atomicity-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-14
 - q: (Predict) The exact same naive GET-then-SET buy code runs with buyers strictly one-at-a-time (serial) instead of in parallel. Stock=100, 500 buyers. Predict units_sold, and state what the result proves about where the bug lives.
 - ref: Exactly 100 sold, fully correct — the identical code is safe serially. The bug lives in the gap between GET and SET, and only concurrency opens that gap: parallel buyers read the same stale value inside each other's windows. Concurrency is the trigger, not the code.
 - grade_note: essential = correct serial outcome + bug located in the interleaving window, not the logic. Miss = predicting serial oversell, or blaming the code path itself.
@@ -189,7 +241,7 @@
 ### [redis-B2]
 - lab: redis-atomicity-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-14
 - q: (Explain-mechanism) After the parallel naive run oversells 400 units, the stock key reads ~97 — it barely moved. Walk the mechanism that leaves the counter almost untouched while 5× the stock walks out the door.
 - ref: ~All 500 buyers GET the same ~100 before anyone's SET lands, each computes ~99, and each SET overwrites the previous one — last-writer-wins discards the other decrements. So ~500 sales each "decrement once" from the same snapshot, and the final stored value reflects only the last write (~97). The stored number lies because concurrent read-modify-writes don't compose.
 - grade_note: essential = concurrent stale reads of the same snapshot + last-writer-wins overwrite discarding decrements. Miss = vague "race condition" without the overwrite step.
@@ -241,7 +293,7 @@
 ### [resilience-B2]
 - lab: resilience-patterns-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-14
 - q: (Boundary) An upstream's latency takes exactly two values: 20 ms normally, 300 ms on a spike, spikeProbability=0.5. Compare a client timeout of 150 ms vs 400 ms: what fraction of requests times out in each case, and why is the shape not a dial?
 - ref: With a bounded two-value latency profile the timeout is a step function: at 150 ms (below the 300 ms ceiling) every spiked request times out — ~50% of traffic, ~10/s at rate 20 (harness: ~9-10.5/s split); at 400 ms (above the ceiling) exactly zero time out — not "fewer." There is no tail to trade against, so moving the timeout between the two fixed values changes nothing, and crossing the upper value zeroes timeouts instantly.
 - grade_note: essential = step function (constant fraction below the ceiling, exactly 0 above) + the bounded-two-value condition that makes it so. Miss = predicting a residual timeout rate above the ceiling.

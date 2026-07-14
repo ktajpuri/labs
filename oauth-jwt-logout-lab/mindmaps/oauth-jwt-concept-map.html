@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Concept Cartographer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  :root {
+    --ink:        #0d1117;
+    --ink-2:      #11161f;
+    --panel:      #161c27;
+    --line:       #232c3b;
+    --text:       #e6ecf3;
+    --text-dim:   #8a97a8;
+    --text-faint: #5d6b7d;
+
+    /* categorical domain palette — tuned, muted, telemetry-like */
+    --d-runtime:  #e0a458;  /* copper   */
+    --d-rag:      #56b6a4;  /* teal     */
+    --d-platform: #9d8df1;  /* violet   */
+    --d-evals:    #e07a8b;  /* rose     */
+    --d-obs:      #6ba8e5;  /* sky      */
+    --d-systems:  #a3c76d;  /* sage     */
+    --d-taste:    #d6b14a;  /* gold     */
+    --d-fleet:    #e0875b;  /* coral    */
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--ink);
+    color: var(--text);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  header {
+    padding: 18px 26px 14px;
+    border-bottom: 1px solid var(--line);
+    background:
+      radial-gradient(120% 140% at 0% 0%, rgba(157,141,241,0.06), transparent 60%),
+      var(--ink-2);
+    flex: 0 0 auto;
+  }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--text-dim); margin: 0 0 6px;
+  }
+  h1 {
+    margin: 0; font-size: clamp(19px, 2.4vw, 27px); font-weight: 650;
+    letter-spacing: -0.01em; line-height: 1.1;
+  }
+  h1 .src { color: var(--text-dim); font-weight: 400; }
+  .sub {
+    margin: 7px 0 0; font-size: 13px; color: var(--text-dim); max-width: 70ch; line-height: 1.5;
+  }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: 14px;
+  }
+  .legend button {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: transparent; border: 1px solid var(--line); color: var(--text-dim);
+    padding: 4px 10px 4px 8px; border-radius: 999px; cursor: pointer;
+    font-size: 11.5px; font-family: ui-monospace, Menlo, monospace; letter-spacing: 0.02em;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  .legend button:hover { color: var(--text); border-color: var(--text-faint); background: rgba(255,255,255,0.02); }
+  .legend .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+
+  .toolbar {
+    display: flex; gap: 8px; align-items: center; margin-left: auto;
+  }
+  .toolbar button {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text-dim);
+    padding: 6px 12px; border-radius: 7px; cursor: pointer; font-size: 12px;
+    font-family: ui-monospace, Menlo, monospace; transition: border-color .15s, color .15s;
+  }
+  .toolbar button:hover { color: var(--text); border-color: var(--text-faint); }
+  .header-row { display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
+
+  #canvas { flex: 1 1 auto; position: relative; }
+  svg { width: 100%; height: 100%; display: block; cursor: grab; }
+  svg:active { cursor: grabbing; }
+
+  .link {
+    fill: none;
+    stroke-opacity: 0.5;
+    stroke-width: 1.5px;
+  }
+
+  .node { cursor: pointer; }
+  .node rect.box {
+    transition: filter .15s ease;
+  }
+  .node:hover rect.box { filter: brightness(1.06); }
+  .node text {
+    -webkit-user-select: none; user-select: none;
+    dominant-baseline: middle;
+  }
+  /* depth-based type treatment — dark text on coloured boxes */
+  .lbl-root  { font-size: 14px;   font-weight: 650; letter-spacing: -0.01em;
+               font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  .lbl-1     { font-size: 13px;   font-weight: 650; letter-spacing: 0.01em;
+               font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  .lbl-2     { font-size: 12px;   font-weight: 550;
+               font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  .lbl-3     { font-size: 11.5px; font-weight: 450;
+               font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -0.02em; }
+
+  .count {
+    font-family: ui-monospace, Menlo, monospace; font-size: 10px;
+    font-weight: 700; pointer-events: none;
+  }
+
+  .hint {
+    position: absolute; bottom: 12px; left: 16px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-faint);
+    background: rgba(13,17,23,0.7); padding: 5px 9px; border-radius: 6px; border: 1px solid var(--line);
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .node rect.box, .link { transition: none !important; }
+  }
+
+  /* ---- explanation modal ---- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(6,9,13,0.62);
+    backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    opacity: 0; pointer-events: none;
+    transition: opacity .18s ease;
+  }
+  .overlay.open { opacity: 1; pointer-events: auto; }
+  .modal {
+    width: min(540px, 94vw); max-height: 82vh; overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+    transform: translateY(8px) scale(0.985);
+    transition: transform .18s ease;
+  }
+  .overlay.open .modal { transform: none; }
+  .modal-top {
+    padding: 22px 24px 16px;
+    border-bottom: 1px solid var(--line);
+    position: relative;
+    border-left: 4px solid var(--line);
+    border-top-left-radius: 14px;
+  }
+  .modal .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+    letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .modal .chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .modal h2 {
+    margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.01em; color: var(--text);
+    line-height: 1.25; padding-right: 28px;
+  }
+  .modal-body { padding: 16px 24px 24px; }
+  .modal-body p { margin: 0 0 13px; font-size: 14px; line-height: 1.62; color: #c7d0db; }
+  .modal-body p:last-child { margin-bottom: 0; }
+  .modal-body .ek {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--text-faint); display: block; margin-bottom: 5px;
+  }
+  .modal-body .muted { color: var(--text-dim); font-style: italic; }
+  .modal-close {
+    position: absolute; top: 16px; right: 16px;
+    width: 30px; height: 30px; border-radius: 8px;
+    background: transparent; border: 1px solid var(--line); color: var(--text-dim);
+    font-size: 17px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: color .15s, border-color .15s;
+  }
+  .modal-close:hover { color: var(--text); border-color: var(--text-faint); }
+
+  .status-row { display: flex; gap: 6px; margin-top: 13px; flex-wrap: wrap; }
+  .st-btn {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 4px 11px;
+    border-radius: 999px; background: transparent; border: 1px solid var(--line);
+    color: var(--text-dim); cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+  }
+  .st-btn:hover { color: var(--text); border-color: var(--text-faint); }
+  .st-btn.active { color: #10151c; background: var(--st, #c8d2de); border-color: transparent; font-weight: 600; }
+
+  .modal-body .tools-sec { margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line); }
+  .modal-body .tools-sec .ek { margin-bottom: 9px; }
+  .modal-body .tool-line { font-size: 13px; line-height: 1.5; color: #c2ccd8; margin: 0 0 7px; }
+  .modal-body .tool-line:last-of-type { margin-bottom: 0; }
+  .modal-body .tool-line b { color: var(--text); font-weight: 600; }
+  .modal-body .tools-note { font-size: 11.5px; color: var(--text-faint); font-style: italic; margin-top: 11px; }
+  .node.pressing rect.box { filter: brightness(1.12); }
+
+  /* ---- collapsible header (works on all viewports) ---- */
+  header.details-collapsed .sub,
+  header.details-collapsed .legend { display: none; }
+
+  @media (max-width: 760px) {
+    header { padding: 12px 16px; }
+    .eyebrow { display: none; }
+    h1 { font-size: 20px; }
+    .header-row { gap: 10px; }
+    .sub { font-size: 12.5px; margin-top: 8px; }
+    .toolbar { width: 100%; margin-left: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+    .toolbar button { white-space: nowrap; font-size: 11px; padding: 6px 10px; flex: 0 0 auto; }
+    .legend { margin-top: 10px; gap: 6px 10px; }
+    .legend button { font-size: 11px; padding: 4px 9px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="header-row">
+      <div>
+        <p class="eyebrow" id="pgEyebrow"></p>
+        <h1 id="pgTitle"></h1>
+        <p class="sub" id="pgSub"></p>
+      </div>
+      <div class="toolbar">
+        <button id="hdrToggle" aria-expanded="true">Hide details</button>
+        <button id="expand">Expand all</button>
+        <button id="collapse">Collapse to domains</button>
+        <button id="fit">Reset view</button>
+      </div>
+    </div>
+    <div class="legend" id="legend"></div>
+  </header>
+  <div id="canvas">
+    <svg id="svg"></svg>
+    <div class="hint">drag to pan · scroll to zoom · tap a node to fold · press &amp; hold for an explanation</div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-top" id="modalTop">
+      <span class="chip" id="modalChip"><span class="dot"></span><span id="modalChipLabel"></span></span>
+      <button class="modal-close" id="modalClose" aria-label="Close">×</button>
+      <h2 id="modalTitle"></h2>
+      <div class="status-row" id="modalStatus"></div>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   AUTHORING DATA — OAuth2 + JWT + Logout (oauth-jwt-logout-lab session)
+   ===================================================================== */
+
+const PAGE_META = {
+  eyebrow: "Failure lab · concept map",
+  title:   "OAuth2 + JWT + Logout",
+  sub:     "Everything covered while building and running oauth-jwt-logout-lab: the authorization-code flow that produces a JWT, what that JWT is made of, what actually terminates a session built on one, two forgery paths, the authn/authz split, and how this lab's architecture differs from a typical “Sign in with Google” app. The gold branch marks what was discussed but never attacked.",
+};
+
+const DOMAINS = {
+  oauth:      { color: "#56b6a4", label: "OAuth2 Flow" },
+  jwt:        { color: "#9d8df1", label: "JWT Structure" },
+  session:    { color: "#e07a8b", label: "Session Termination" },
+  forgery:    { color: "#e0875b", label: "Forgery & Algorithm Confusion" },
+  authnz:     { color: "#6ba8e5", label: "Authn vs Authz" },
+  arch:       { color: "#a3c76d", label: "Architecture Patterns" },
+  unexplored: { color: "#d6b14a", label: "Unexplored Attack Surface" },
+};
+
+const DATA = {
+  name: "OAuth2 + JWT + Logout",
+  children: [
+    { name: "OAuth2 Flow", domain: "oauth", children: [
+      { name: "Roles", children: [
+        { name: "Client" },
+        { name: "Authorization Server" },
+        { name: "Resource Server" },
+      ]},
+      { name: "Authorization Code Grant", children: [
+        { name: "GET /authorize" },
+        { name: "POST /token" },
+        { name: "One-time authorization code" },
+      ]},
+      { name: "PKCE", star: true, children: [
+        { name: "code_verifier" },
+        { name: "code_challenge" },
+        { name: "Defeats code interception" },
+      ]},
+      { name: "state parameter", children: [
+        { name: "CSRF guard" },
+      ]},
+      { name: "redirect_uri allow-list" },
+    ]},
+
+    { name: "JWT Structure", domain: "jwt", children: [
+      { name: "Header", children: [
+        { name: "alg" },
+        { name: "typ" },
+      ]},
+      { name: "Payload / Claims", children: [
+        { name: "sub / aud / iss" },
+        { name: "jti" },
+        { name: "iat and exp" },
+      ]},
+      { name: "Signature", children: [
+        { name: "RS256 (asymmetric)" },
+        { name: "HS256 (symmetric)" },
+        { name: "Not encryption" },
+      ]},
+    ]},
+
+    { name: "Session Termination", domain: "session", children: [
+      { name: "Logout ≠ Invalidation", star: true, children: [
+        { name: "Stateless verification" },
+        { name: "No per-request callback" },
+      ]},
+      { name: "jti Denylist", children: [
+        { name: "Costs statelessness" },
+        { name: "Needs its own TTL" },
+      ]},
+      { name: "exp / TTL boundary", children: [
+        { name: "Step function, not gradual" },
+        { name: "clockTimestamp >= exp" },
+      ]},
+      { name: "Refresh-token family revocation", children: [
+        { name: "Stops future access tokens" },
+        { name: "Partial-logout gap" },
+      ]},
+    ]},
+
+    { name: "Forgery & Algorithm Confusion", domain: "forgery", children: [
+      { name: "alg=none", children: [
+        { name: "Empty signature accepted if unpinned" },
+      ]},
+      { name: "HS/RS key confusion", children: [
+        { name: "Public key misused as HMAC secret" },
+        { name: "jsonwebtoken's built-in guard" },
+      ]},
+      { name: "Defenses", children: [
+        { name: "Pin algorithms server-side" },
+        { name: "Library-level key-type guard" },
+      ]},
+    ]},
+
+    { name: "Authn vs Authz", domain: "authnz", children: [
+      { name: "Authentication (who)", children: [
+        { name: "OIDC id_token" },
+        { name: "Real login screen" },
+      ]},
+      { name: "Authorization (what's allowed)", children: [
+        { name: "OAuth2 access_token" },
+        { name: "Scopes" },
+      ]},
+      { name: "This lab's mock IdP skips real authn" },
+    ]},
+
+    { name: "Architecture Patterns", domain: "arch", children: [
+      { name: "OAuth for Login", children: [
+        { name: "IdP token consumed once, server-side" },
+        { name: "App mints its own session cookie" },
+      ]},
+      { name: "OAuth for API Access", children: [
+        { name: "Token itself is the ongoing credential" },
+      ]},
+      { name: "The logout problem can recur", children: [
+        { name: "If the app's session is JWT-strategy" },
+      ]},
+    ]},
+
+    { name: "Unexplored Attack Surface", domain: "unexplored", children: [
+      { name: "redirect_uri tampering" },
+      { name: "state / CSRF exploitation" },
+      { name: "Authorization code interception & replay" },
+      { name: "PKCE downgrade attack" },
+    ]},
+  ],
+};
+
+const EXPLAIN = {
+  "OAuth2 + JWT + Logout": { p: [
+    "The map for one lab session (oauth-jwt-logout-lab), built the night before a OneTrust interview: how the OAuth2 authorization-code flow produces a JWT, what that JWT actually is, and — the lab's real subject — what it takes to make logout mean something against a token that verifies itself statelessly.",
+    "Seven branches: the OAuth2 flow itself, the JWT's anatomy, how a session built on one is actually terminated, two forgery paths that were run against the harness, the authn/authz distinction, how this lab's architecture compares to a typical browser login, and what was discussed but never attacked.",
+  ]},
+
+  "OAuth2 Flow": { p: [
+    "The authorization-code grant: a Client gets a short-lived, single-use code from an Authorization Server after the resource owner approves, then exchanges that code for tokens. Everything under this branch was exercised correctly in the lab's happy path — it's how the tokens attacked in the rest of the map got minted in the first place.",
+  ]},
+  "Roles": { p: [
+    "Three parties in every OAuth2 exchange, each with a distinct trust boundary.",
+  ]},
+  "Client": { p: [
+    "The application requesting access on the resource owner's behalf. In the lab, `flow.js` plays this role; in a real “Sign in with Google” app, it's your own backend.",
+  ]},
+  "Authorization Server": { p: [
+    "Issues tokens after the resource owner approves. The lab's `authz-server.js` is a mock of this role — Google plays it for real in a production OAuth flow.",
+  ]},
+  "Resource Server": { p: [
+    "Hosts the protected resource and decides whether to honor a request based on the token presented. In the lab, `resource-server.js` verifies the JWT locally, with no callback to the Authorization Server unless the denylist check is turned on.",
+  ]},
+  "Authorization Code Grant": { p: [
+    "The two-step exchange at the center of OAuth2: get a code, then redeem it for tokens. Splitting it into two steps (rather than returning tokens directly) keeps the token exchange off the front channel — the code appears in a redirect URL, but the tokens only ever travel over a direct, back-channel request.",
+  ]},
+  "GET /authorize": { p: [
+    "The client redirects the resource owner here to approve access. The Authorization Server checks `redirect_uri` against its allow-list and, on approval, returns a one-time code.",
+  ]},
+  "POST /token": { p: [
+    "The client redeems the code for tokens, over a direct server-to-server (or CLI-to-server) request rather than a browser redirect. This is where PKCE gets checked and where the JWT actually gets minted.",
+  ]},
+  "One-time authorization code": { p: [
+    "Short-lived and single-use by design — the lab's `authz-server.js` deletes it from its map the moment it's redeemed, so a replayed code fails outright.",
+  ]},
+  "PKCE": { p: [
+    "Proof Key for Code Exchange (RFC 7636). Defends the authorization code itself against interception: the client commits to a secret (`code_verifier`) up front via its hash (`code_challenge`), and only reveals the secret at the final token exchange.",
+    "Originally built for public clients (mobile apps, SPAs) that can't hold a client secret safely; OAuth 2.1 now recommends it for every client, confidential or not, because it's cheap and closes a real gap regardless of client type.",
+  ]},
+  "code_verifier": { p: [
+    "A random secret the client generates and keeps entirely local until the final `/token` call. It never appears in any URL or redirect, which is exactly what makes it useless to an interceptor of the authorization code.",
+  ]},
+  "code_challenge": { p: [
+    "`BASE64URL(SHA256(code_verifier))`, sent openly at `/authorize`. One-way: knowing the challenge doesn't let you derive the verifier, so it's safe to expose in a URL.",
+  ]},
+  "Defeats code interception": { p: [
+    "Anyone who intercepts the authorization code (browser history, a referrer leak, a malicious app on the same mobile URL scheme) still can't redeem it — the Authorization Server will recompute the hash of whatever `code_verifier` they present and reject a mismatch. Solves a different problem than `state`: this stops an outsider from using a code that isn't theirs, not a user's browser being tricked into someone else's flow.",
+  ]},
+  "state parameter": { p: [
+    "A random value the client generates before redirecting to `/authorize` and checks for an exact match when the Authorization Server redirects back.",
+  ]},
+  "CSRF guard": { p: [
+    "A mismatched or missing `state` means the response isn't bound to a request this client actually initiated — the classic defense against an attacker tricking a victim's browser into completing the attacker's own OAuth flow.",
+  ]},
+  "redirect_uri allow-list": { p: [
+    "The Authorization Server only redirects to URIs it was told about in advance, checked server-side at `/authorize`. Without this, an attacker could register `redirect_uri` pointing at their own endpoint and have the authorization code delivered straight to them.",
+  ], note: "This lab exercised the allow-list check on the happy path but never tried to defeat it — that's the first item in the Unexplored Attack Surface branch." },
+
+  "JWT Structure": { p: [
+    "Three dot-separated, independently base64url-encoded parts — header, payload, signature. Only the signature is cryptographically meaningful; the other two are plainly readable by anyone holding the token.",
+  ]},
+  "Header": { p: [
+    "Metadata about the token itself, readable and — critically — attacker-editable, since a token is just a string until it's verified.",
+  ]},
+  "alg": { p: [
+    "Names the signing algorithm. A resource server that reads this field to decide *how* to verify, instead of hardcoding one algorithm, hands the attacker control over its own verification policy — the root cause behind both forgery paths in this map.",
+  ]},
+  "typ": { p: [
+    "Almost always `\"JWT\"`. Declarative, not load-bearing for security.",
+  ]},
+  "Payload / Claims": { p: [
+    "The actual assertions the token makes — plain base64, not encrypted, not secret. Anyone can decode and read a JWT's payload without any key at all.",
+  ]},
+  "sub / aud / iss": { p: [
+    "`sub` is who the token is about; `aud` scopes it to a specific resource (so a token minted for one API can't be replayed against another); `iss` names who signed it, checked against what the verifier expects.",
+  ]},
+  "jti": { p: [
+    "A unique ID for this specific token. It doesn't do anything on its own — it's inert unless a resource server explicitly checks it against a revocation store, which is exactly the denylist mechanism under Session Termination.",
+  ]},
+  "iat and exp": { p: [
+    "Issued-at and expiry, as Unix timestamps. `exp` is the single field standing between a stateless JWT and it being valid forever.",
+  ]},
+  "Signature": { p: [
+    "The only part of a JWT that can't be freely edited — proof that whoever holds the corresponding signing key produced these exact bytes.",
+  ]},
+  "RS256 (asymmetric)": { p: [
+    "Sign with a private key, verify with the corresponding public key. The public key can be published openly (the lab's `/pubkey` endpoint) without weakening the scheme, because only the private key can produce a valid signature.",
+  ]},
+  "HS256 (symmetric)": { p: [
+    "Sign and verify with the *same* secret. Safe only if that secret is genuinely secret — using something public (like an RS256 public key) as an HS256 secret is a category error, not a cryptographic weakness in HS256 itself.",
+  ]},
+  "Not encryption": { p: [
+    "A JWT's payload isn't hidden from anyone who holds the token — the signature proves authenticity and integrity, it doesn't provide confidentiality. Don't put anything in a JWT you wouldn't put in a URL.",
+  ]},
+
+  "Session Termination": { p: [
+    "The actual subject of the lab: what it takes to make a JWT stop being trusted before its natural expiry, and what each mechanism costs.",
+  ]},
+  "Logout ≠ Invalidation": { p: [
+    "The lab's central, confirmed finding: with a purely stateless resource server, replaying the exact same access token after `/logout` still returned 200. Logout updated the Authorization Server's own bookkeeping; the Resource Server's verification path never reads it.",
+  ]},
+  "Stateless verification": { p: [
+    "The Resource Server checks a signature and a handful of claims (`aud`, `iss`, `exp`) using a public key it cached once, at boot. Nothing about that check depends on anything happening on the Authorization Server after that point.",
+  ]},
+  "No per-request callback": { p: [
+    "By design, for performance and availability — a Resource Server that had to call the Authorization Server on every request would lose the whole point of a self-contained, verifiable token. That design choice is exactly what makes logout invisible to it.",
+  ]},
+  "jti Denylist": { p: [
+    "The fix: the Resource Server checks a token's `jti` against a live revocation list maintained by the Authorization Server, on every request.",
+  ]},
+  "Costs statelessness": { p: [
+    "Turns every request into (at minimum) a network round-trip to check revocation status — trading away the property that made JWTs attractive in the first place, in exchange for logout actually meaning something immediately.",
+  ]},
+  "Needs its own TTL": { p: [
+    "An unbounded denylist just grows forever — a `jti` only needs to be checked while its token could otherwise still pass the `exp` check on its own, so entries should expire alongside (or slightly after, for clock skew) the token they reference.",
+  ], note: "Not run as a scenario in the lab; captured as a drill question in the question bank instead." },
+  "exp / TTL boundary": { p: [
+    "The other lever: keep tokens short-lived enough that the window a compromised or “logged out” token stays valid is small, without needing any revocation store at all.",
+  ]},
+  "Step function, not gradual": { p: [
+    "Confirmed by a one-second polling loop against a 60-second TTL: `200` at t+59s, `401` at t+60s, nothing in between. Expiry isn't a probabilistic decay — it's a single comparison that flips at one exact instant.",
+  ]},
+  "clockTimestamp >= exp": { p: [
+    "The `jsonwebtoken` library's actual expiry check, a `>=` not a `>`. That's why the boundary trips the instant N whole seconds have elapsed, not after N+1 — a one-second miss on this exact detail was the lab's own off-by-one moment.",
+  ]},
+  "Refresh-token family revocation": { p: [
+    "The third lever: even if an access token can't be revoked directly, revoking the refresh token stops any *new* access tokens from being minted once the current one expires.",
+  ]},
+  "Stops future access tokens": { p: [
+    "Doesn't touch the currently-valid access token at all — it only closes off the renewal path, so the session's remaining lifetime is bounded by whatever's left on the current token's `exp`.",
+  ]},
+  "Partial-logout gap": { p: [
+    "If `logout` revokes the access token's `jti` but not the refresh-token family, a subsequent `refresh` call would still mint a fresh, fully valid access token — meaning the session didn't actually end.",
+  ], note: "This was the lab's Scenario 7 (stretch) — designed but not run this session." },
+
+  "Forgery & Algorithm Confusion": { p: [
+    "Both failure paths share one root cause: a Resource Server that lets the token's own `alg` header pick the verification method, instead of pinning one algorithm server-side.",
+  ]},
+  "alg=none": { p: [
+    "The most direct exploit: a token whose header claims `alg: \"none\"` and carries no signature segment at all.",
+  ]},
+  "Empty signature accepted if unpinned": { p: [
+    "Confirmed in the lab: with algorithm pinning off, a completely unsigned, attacker-authored token (arbitrary `sub`, arbitrary claims) was accepted outright. Pinning to `RS256` closed it instantly, because `'none'` is then never in the allowed set.",
+  ]},
+  "HS/RS key confusion": { p: [
+    "A subtler version: sign a token with HS256 (symmetric), using the server's own RS256 *public* key as the HMAC secret. If the server also treats that key as a valid HS256 secret, the forgery verifies.",
+  ]},
+  "Public key misused as HMAC secret": { p: [
+    "The category error at the heart of the attack: an RS256 public key is, by definition, meant to be public. Treating it as if it were a private HMAC secret only makes sense if the verifier lets the attacker choose that treatment via the `alg` header.",
+  ]},
+  "jsonwebtoken's built-in guard": { p: [
+    "The lab's actual surprise: the attack didn't succeed, not because the reasoning was wrong, but because the `jsonwebtoken` library inspects key material and refuses to use PEM/DER-shaped (asymmetric) keys for an HS-family algorithm at all — independent of whether the server pins its own algorithm.",
+  ]},
+  "Defenses": { p: [
+    "Two independent layers, neither sufficient alone: what the server's own code does, and what the library it depends on refuses to do regardless.",
+  ]},
+  "Pin algorithms server-side": { p: [
+    "Always specify the exact algorithm(s) you expect (`algorithms: ['RS256']`) rather than trusting the token's own `alg` header. Necessary, but scoped to whichever service you actually configured this way — every other consumer of tokens from the same issuer needs its own correct pin.",
+  ]},
+  "Library-level key-type guard": { p: [
+    "A second, independent line of defense that doesn't depend on any single service's configuration being correct — the library itself refuses the confusion. Worth knowing this exists, but not a substitute for pinning, since not every JWT library in every language has it.",
+  ]},
+
+  "Authn vs Authz": { p: [
+    "OAuth2 is natively an authorization protocol — delegated, scoped access. OIDC is the layer built on top that adds a standardized authentication assertion. Conflating the two is a well-known real-world source of bugs.",
+  ]},
+  "Authentication (who)": { p: [
+    "Proving identity. In a real OAuth2/OIDC flow this happens at the Authorization Server's own login screen, before any code is issued.",
+  ]},
+  "OIDC id_token": { p: [
+    "A signed JWT that specifically asserts identity (as opposed to an OAuth2 access token, which asserts permission). Its signature is what lets a relying party trust the authentication claim.",
+  ]},
+  "Real login screen": { p: [
+    "Password, passkey, or MFA challenge presented by the Authorization Server to the resource owner — the actual authentication event.",
+  ], note: "This lab's mock Authorization Server never implements one; see the sibling leaf under this domain." },
+  "Authorization (what's allowed)": { p: [
+    "Granting permission to act, independent of proving who's acting. This is what OAuth2's access token fundamentally represents.",
+  ]},
+  "OAuth2 access_token": { p: [
+    "A credential that says “the bearer may access X” — not “the bearer is definitely person Y.” Everything this lab's failure matrix tested (logout, denylist, expiry, forgery) lives entirely on this side of the authn/authz line.",
+  ]},
+  "Scopes": { p: [
+    "The specific permissions an access token carries, e.g. `email profile` in a Google OAuth request — narrows what the token authorizes, distinct from who it identifies.",
+  ]},
+  "This lab's mock IdP skips real authn": { p: [
+    "`authz-server.js` hands back a hardcoded `sub: \"user-123\"` unconditionally on `/authorize` — there's no real login step. A production Authorization Server authenticates the human before minting anything; this lab's scope was entirely about what happens after that point.",
+  ], note: "A deliberate simplification for this lab's scope, not an oversight to fix." },
+
+  "Architecture Patterns": { p: [
+    "Two different things an OAuth2 flow's output can become, surfaced by comparing this lab's design against a real production login (a NextAuth/Auth.js “Sign in with Google” flow) mid-session.",
+  ]},
+  "OAuth for Login": { p: [
+    "The common shape for “Sign in with X”: the IdP's token is used once, purely to answer “who is this,” then the app takes over session management entirely on its own.",
+  ]},
+  "IdP token consumed once, server-side": { p: [
+    "The exchange (`code` → tokens) happens server-to-server, invisible in a browser's network tab. The IdP's access/id token is typically discarded right after — unless the app also needs to call the IdP's APIs later on the user's behalf.",
+  ]},
+  "App mints its own session cookie": { p: [
+    "The browser never holds the IdP's token as its ongoing credential — it holds a session cookie the app itself created and owns, entirely separate from anything Google (or any IdP) issued.",
+  ]},
+  "OAuth for API Access": { p: [
+    "The other shape: the OAuth-issued token itself becomes the client's ongoing bearer credential, presented on every subsequent request.",
+  ]},
+  "Token itself is the ongoing credential": { p: [
+    "This is the architecture this lab actually built and tested — deliberately, because it's the shape where “does logout work” is sharpest and most directly observable.",
+  ]},
+  "The logout problem can recur": { p: [
+    "Choosing the “OAuth for Login” pattern doesn't automatically dodge this lab's findings — it just relocates where the same question needs asking.",
+  ]},
+  "If the app's session is JWT-strategy": { p: [
+    "If an app's own session cookie is itself a JWT (common on serverless/edge deployments that avoid a database round-trip), it inherits the exact same stateless-outlives-logout problem this lab demonstrated — just under a cookie name instead of an `Authorization` header.",
+  ], note: "Raised as a live question about a specific real app during the session; not independently confirmed which session strategy that app actually uses." },
+
+  "Unexplored Attack Surface": { p: [
+    "Everything in this branch was scoped out deliberately at the start of the lab (Phase 0) to keep the session focused on session-termination, not because these aren't real. Each was exercised correctly on the happy path but never attacked.",
+  ], note: "Parking-lot items from why-doc.md — candidates for a follow-up lab, not gaps in this one's execution." },
+  "redirect_uri tampering": { p: [
+    "Testing what happens if a malicious or malformed `redirect_uri` is presented at `/authorize` beyond the allow-list check already exercised.",
+  ], note: "Not tested this session." },
+  "state / CSRF exploitation": { p: [
+    "Actually attempting the CSRF attack `state` defends against — e.g. omitting or forging `state` to see whether the client-side check can be bypassed.",
+  ], note: "Not tested this session." },
+  "Authorization code interception & replay": { p: [
+    "Capturing a legitimate authorization code and attempting to redeem it from a different client, with and without PKCE in place.",
+  ], note: "Not tested this session." },
+  "PKCE downgrade attack": { p: [
+    "Testing whether an Authorization Server can be tricked into skipping or accepting a weakened PKCE check, e.g. via a missing `code_challenge_method` or a client that claims not to support PKCE.",
+  ], note: "Not tested this session." },
+};
+
+const TOOLS = {
+  "Authorization Server": [
+    "Hosted IdPs: Google, Okta, Auth0, Microsoft Entra ID",
+    "Self-hosted: Keycloak, Ory Hydra",
+  ],
+  "PKCE": [
+    "Client libraries with built-in PKCE support: openid-client (Node), oauth4webapi, AppAuth (iOS/Android)",
+  ],
+  "Signature": [
+    "JWT libraries: jsonwebtoken (Node), PyJWT (Python), jose (JS/TS), jjwt (Java)",
+    "Debugger: jwt.io",
+  ],
+  "jti Denylist": [
+    "Common backing store: Redis, valued here specifically for fast TTL-based key expiry",
+  ],
+  "OAuth for Login": [
+    "Session/auth frameworks: NextAuth.js / Auth.js, Passport.js, Clerk, Supabase Auth",
+  ],
+};
+
+// ---- assign inherited domain + collapse state ----
+const svg = d3.select("#svg");
+const gZoom = svg.append("g");
+const gLinks = gZoom.append("g");
+const gNodes = gZoom.append("g");
+
+let i = 0;
+const duration = 380;
+const root = d3.hierarchy(DATA);
+
+// inherit domain colour down each branch
+root.each(d => {
+  if (d.data.domain) d.domainKey = d.data.domain;
+  else if (d.parent && d.parent.domainKey) d.domainKey = d.parent.domainKey;
+  else d.domainKey = null;
+});
+const colorOf = d => d.domainKey ? DOMAINS[d.domainKey].color : "#c8d2de";
+
+// ---- box geometry: pre-measure wrapped text for each node ----
+const PAD_X = 13, PAD_Y = 8, MAX_TEXT_W = 200, V_GUTTER = 16;
+const fontFor = d => {
+  if (d.depth <= 1) return { f: '650 13px ui-sans-serif, -apple-system, "Segoe UI", sans-serif', lh: 17 };
+  if (d.depth === 2) return { f: '550 12px ui-sans-serif, -apple-system, "Segoe UI", sans-serif', lh: 16 };
+  return { f: '450 11.5px ui-monospace, Menlo, monospace', lh: 15 };
+};
+const _mctx = document.createElement("canvas").getContext("2d");
+function wrapText(text, maxW, font) {
+  _mctx.font = font;
+  const words = text.split(/\s+/);
+  const lines = []; let cur = "";
+  for (const w of words) {
+    const t = cur ? cur + " " + w : w;
+    if (_mctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; }
+    else cur = t;
+  }
+  if (cur) lines.push(cur);
+  let widest = 0;
+  for (const l of lines) widest = Math.max(widest, _mctx.measureText(l).width);
+  return { lines, widest };
+}
+root.each(d => {
+  const { f, lh } = fontFor(d);
+  const display = (d.depth > 0 && d.data.star) ? ("★  " + d.data.name) : d.data.name;
+  const { lines, widest } = wrapText(display, MAX_TEXT_W, f);
+  d._lines = lines;
+  d._lh = lh;
+  d._w = Math.ceil(widest) + PAD_X * 2;
+  d._h = lines.length * lh + PAD_Y * 2;
+});
+
+// ---- progress tracking (best-effort persistence) ----
+const STORE_NS = "ccart:" + (PAGE_META.title || "map").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+const _mem = {};
+function storeGet(k) { try { return localStorage.getItem(STORE_NS + ":" + k); } catch (e) { return (k in _mem) ? _mem[k] : null; } }
+function storeSet(k, v) { try { localStorage.setItem(STORE_NS + ":" + k, v); } catch (e) { _mem[k] = v; } }
+const STATUSES = [
+  { key: "",         label: "Not started", color: "transparent" },
+  { key: "learning", label: "Learning",    color: "#e0a458" },
+  { key: "known",    label: "Known",       color: "#5fbf7d" },
+];
+const statusColor = {};
+STATUSES.forEach(s => statusColor[s.key] = s.color);
+function statusOf(d) { return storeGet("st:" + d.data.name) || ""; }
+function setStatus(d, s) { storeSet("st:" + d.data.name, s); }
+
+// colour: bold base at domain level, lightening into tints with depth
+function nodeFill(d) {
+  if (d.depth === 0) return "#1b2330";
+  const base = DOMAINS[d.domainKey].color;
+  const f = d.depth === 1 ? 0 : d.depth === 2 ? 0.55 : 0.74;
+  return d3.interpolateRgb(base, "#eef2f7")(f);
+}
+const nodeStroke = d => d.depth === 0 ? "#2c3645" : d3.interpolateRgb(DOMAINS[d.domainKey].color, "#000")(0.18);
+const textFill = d => d.depth === 0 ? "#e6ecf3" : "#10151c";
+
+// start: domains visible, deeper levels collapsed
+root.x0 = 0; root.y0 = 0;
+function collapse(d) { if (d.children) { d._children = d.children; d._children.forEach(collapse); d.children = null; } }
+function collapseToDomains() {
+  if (root.children) root.children.forEach(c => { if (c.children) c.children.forEach(collapse); });
+}
+collapseToDomains();
+
+const DEPTH = 300;
+const tree = d3.tree()
+  .nodeSize([1, DEPTH])
+  .separation((a, b) => (a._h / 2 + b._h / 2 + V_GUTTER));
+
+const zoom = d3.zoom().scaleExtent([0.25, 2.2]).on("zoom", e => gZoom.attr("transform", e.transform));
+svg.call(zoom);
+
+// link from parent's right edge to child's left edge
+function linkPath(d) {
+  const sx = d.parent.y + d.parent._w, sy = d.parent.x;
+  const tx = d.y, ty = d.x;
+  const mx = (sx + tx) / 2;
+  return `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`;
+}
+function linkCollapsed(p) {
+  const sx = p.y, sy = p.x;
+  return `M ${sx} ${sy} C ${sx} ${sy}, ${sx} ${sy}, ${sx} ${sy}`;
+}
+
+function update(source) {
+  const nodes = tree(root).descendants();
+  const links = nodes.slice(1);
+  nodes.forEach(d => d.y = d.depth * DEPTH);
+
+  // NODES
+  const node = gNodes.selectAll("g.node")
+    .data(nodes, d => d.id || (d.id = ++i));
+
+  const nodeEnter = node.enter().append("g")
+    .attr("class", "node")
+    .attr("transform", () => `translate(${source.y0},${source.x0})`)
+    .style("opacity", 0)
+    .on("click", (event, d) => {
+      if (lpFired) { lpFired = false; return; }   // long-press already handled it
+      toggle(d); update(d);
+    })
+    .on("pointerdown", (event, d) => startPress(event, d))
+    .on("pointerup", endPress)
+    .on("pointerleave", endPress)
+    .on("pointercancel", endPress);
+
+  // box
+  nodeEnter.append("rect")
+    .attr("class", "box")
+    .attr("rx", 7).attr("ry", 7)
+    .attr("x", 0)
+    .attr("y", d => -d._h / 2)
+    .attr("width", d => d._w)
+    .attr("height", d => d._h)
+    .attr("fill", nodeFill)
+    .attr("stroke", nodeStroke)
+    .attr("stroke-width", d => d.depth === 0 ? 1 : 0.8);
+
+  // progress stripe (left edge)
+  nodeEnter.append("rect")
+    .attr("class", "status-stripe")
+    .attr("x", 0).attr("rx", 2).attr("ry", 2)
+    .attr("width", 5)
+    .style("pointer-events", "none");
+
+  // multi-line label
+  nodeEnter.append("text")
+    .attr("class", d => d.depth === 0 ? "lbl-root" : ("lbl-" + Math.min(d.depth, 3)))
+    .attr("fill", textFill)
+    .attr("x", PAD_X)
+    .each(function (d) {
+      const t = d3.select(this);
+      const total = d._lines.length;
+      d._lines.forEach((ln, k) => {
+        t.append("tspan")
+          .attr("x", PAD_X)
+          .attr("y", (k - (total - 1) / 2) * d._lh)
+          .text(ln);
+      });
+    });
+
+  // collapsed-count badge (pill on right edge)
+  const badge = nodeEnter.append("g").attr("class", "badge");
+  badge.append("circle").attr("r", 9);
+  badge.append("text").attr("class", "count").attr("text-anchor", "middle").attr("dy", "0.34em");
+
+  const nodeUpdate = nodeEnter.merge(node);
+
+  nodeUpdate.transition().duration(duration)
+    .attr("transform", d => `translate(${d.y},${d.x})`)
+    .style("opacity", 1);
+
+  nodeUpdate.select("rect.box")
+    .attr("y", d => -d._h / 2)
+    .attr("width", d => d._w)
+    .attr("height", d => d._h)
+    .attr("fill", nodeFill);
+
+  nodeUpdate.select("rect.status-stripe")
+    .attr("y", d => -d._h / 2)
+    .attr("height", d => d._h)
+    .style("display", d => statusOf(d) ? null : "none")
+    .attr("fill", d => statusColor[statusOf(d)] || "transparent");
+
+  nodeUpdate.select("g.badge")
+    .attr("transform", d => `translate(${d._w + 3}, 0)`)
+    .style("display", d => d._children ? null : "none");
+  nodeUpdate.select("g.badge circle")
+    .attr("fill", d => d.domainKey ? DOMAINS[d.domainKey].color : "#c8d2de");
+  nodeUpdate.select("g.badge text.count")
+    .attr("fill", "#10151c")
+    .text(d => d._children ? d._children.length : "");
+
+  node.exit().transition().duration(duration)
+    .attr("transform", () => `translate(${source.y},${source.x})`)
+    .style("opacity", 0)
+    .remove();
+
+  // LINKS
+  const link = gLinks.selectAll("path.link")
+    .data(links, d => d.id);
+
+  const linkEnter = link.enter().insert("path", "g")
+    .attr("class", "link")
+    .attr("stroke", d => colorOf(d))
+    .attr("d", () => linkCollapsed({ y: source.y0, x: source.x0 }));
+
+  linkEnter.merge(link).transition().duration(duration)
+    .attr("stroke", d => colorOf(d))
+    .attr("d", d => linkPath(d));
+
+  link.exit().transition().duration(duration)
+    .attr("d", () => linkCollapsed({ y: source.y, x: source.x }))
+    .remove();
+
+  nodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+}
+
+function toggle(d) {
+  if (d.children) { d._children = d.children; d.children = null; }
+  else { d.children = d._children; d._children = null; }
+}
+
+function expandAll(d) { if (d._children) { d.children = d._children; d._children = null; } if (d.children) d.children.forEach(expandAll); }
+
+// ---- legend ----
+const legend = d3.select("#legend");
+Object.entries(DOMAINS).forEach(([key, v]) => {
+  const b = legend.append("button");
+  b.append("span").attr("class", "dot").style("background", v.color);
+  b.append("span").text(v.label);
+  b.on("click", () => {
+    const target = root.children.find(c => c.domainKey === key);
+    if (!target) return;
+    if (!target.children && target._children) { target.children = target._children; target._children = null; }
+    update(target);
+    setTimeout(() => focusOn(target), duration + 30);
+  });
+});
+
+// ---- controls ----
+d3.select("#expand").on("click", () => { expandAll(root); update(root); setTimeout(fit, duration + 40); });
+d3.select("#collapse").on("click", () => { collapseToDomains(); update(root); setTimeout(fit, duration + 40); });
+d3.select("#fit").on("click", fit);
+
+function bounds() {
+  const ns = root.descendants();
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  ns.forEach(d => {
+    minX = Math.min(minX, d.x - d._h / 2);
+    maxX = Math.max(maxX, d.x + d._h / 2);
+    minY = Math.min(minY, d.y);
+    maxY = Math.max(maxY, d.y + d._w);
+  });
+  return { minX, maxX, minY, maxY };
+}
+
+function fit() {
+  const node = document.getElementById("canvas");
+  const W = node.clientWidth, H = node.clientHeight;
+  if (!W || !H) return;
+  const b = bounds();
+  const w = (b.maxY - b.minY) + 80;
+  const h = (b.maxX - b.minX) + 80;
+  const k = Math.min(W / w, H / h, 1.8);
+  const tx = (W - k * (b.minY + b.maxY)) / 2;
+  const ty = (H - k * (b.minX + b.maxX)) / 2;
+  svg.transition().duration(420).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+}
+
+function focusOn(d) {
+  const node = document.getElementById("canvas");
+  const W = node.clientWidth, H = node.clientHeight;
+  const k = 0.8;
+  const tx = W * 0.32 - k * d.y;
+  const ty = H / 2 - k * d.x;
+  svg.transition().duration(420).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+}
+
+// ---- long-press → explanation modal ----
+let lpTimer = null, lpFired = false, lpStart = null, lpNode = null;
+const LP_MS = 450, LP_MOVE_TOL = 10;
+
+function startPress(event, d) {
+  endPress();
+  lpFired = false;
+  lpStart = { x: event.clientX, y: event.clientY };
+  lpNode = event.currentTarget;
+  d3.select(lpNode).classed("pressing", true);
+  lpTimer = setTimeout(() => {
+    lpFired = true;
+    if (lpNode) d3.select(lpNode).classed("pressing", false);
+    lpNode = null; lpTimer = null;
+    openModal(d);
+  }, LP_MS);
+}
+function endPress() {
+  if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+  if (lpNode) { d3.select(lpNode).classed("pressing", false); lpNode = null; }
+  lpStart = null;
+}
+// moving (a pan attempt) cancels the long-press
+document.addEventListener("pointermove", (e) => {
+  if (!lpStart || !lpTimer) return;
+  if (Math.hypot(e.clientX - lpStart.x, e.clientY - lpStart.y) > LP_MOVE_TOL) endPress();
+}, { passive: true });
+// suppress the OS text-selection callout during a hold
+document.getElementById("svg").addEventListener("contextmenu", (e) => e.preventDefault());
+
+const overlay = document.getElementById("overlay");
+const modalTop = document.getElementById("modalTop");
+const modalChipLabel = document.getElementById("modalChipLabel");
+const modalChipDot = overlay.querySelector(".chip .dot");
+const modalTitle = document.getElementById("modalTitle");
+const modalBody = document.getElementById("modalBody");
+const modalStatus = document.getElementById("modalStatus");
+
+function renderStatusRow(d) {
+  modalStatus.innerHTML = "";
+  const cur = statusOf(d);
+  STATUSES.forEach(s => {
+    const b = document.createElement("button");
+    b.className = "st-btn" + (cur === s.key ? " active" : "");
+    b.textContent = s.label;
+    if (s.key) b.style.setProperty("--st", s.color);
+    b.onclick = () => { setStatus(d, s.key); renderStatusRow(d); update(d); };
+    modalStatus.appendChild(b);
+  });
+}
+
+function openModal(d) {
+  const color = d.depth === 0 ? "#c8d2de" : DOMAINS[d.domainKey].color;
+  const label = d.depth === 0 ? "Overview" : DOMAINS[d.domainKey].label;
+  modalChipDot.style.background = color;
+  modalChipLabel.textContent = label;
+  modalTop.style.borderLeftColor = color;
+  modalTitle.textContent = d.data.name;
+  renderStatusRow(d);
+
+  const entry = EXPLAIN[d.data.name];
+  modalBody.innerHTML = "";
+  if (entry && entry.p) {
+    entry.p.forEach(text => {
+      const p = document.createElement("p");
+      p.textContent = text;
+      modalBody.appendChild(p);
+    });
+    if (entry.note) {
+      const n = document.createElement("p");
+      n.className = "muted";
+      n.textContent = entry.note;
+      modalBody.appendChild(n);
+    }
+  } else {
+    const n = document.createElement("p");
+    n.className = "muted";
+    n.textContent = "No separate explanation added for this node — it's a specific phrasing rather than a standalone concept.";
+    modalBody.appendChild(n);
+  }
+
+  const tools = TOOLS[d.data.name];
+  if (tools && tools.length) {
+    const sec = document.createElement("div");
+    sec.className = "tools-sec";
+    const lab = document.createElement("span");
+    lab.className = "ek";
+    lab.textContent = "Commonly used tools & tech";
+    sec.appendChild(lab);
+    tools.forEach(line => {
+      const div = document.createElement("div");
+      div.className = "tool-line";
+      const idx = line.indexOf(": ");
+      if (idx > -1 && idx < 30) {
+        const b = document.createElement("b");
+        b.textContent = line.slice(0, idx + 1);
+        div.appendChild(b);
+        div.appendChild(document.createTextNode(line.slice(idx + 1)));
+      } else {
+        div.textContent = line;
+      }
+      sec.appendChild(div);
+    });
+    const note = document.createElement("div");
+    note.className = "tools-note";
+    note.textContent = "Examples, not a ranked or exhaustive list — this landscape changes quickly.";
+    sec.appendChild(note);
+    modalBody.appendChild(sec);
+  }
+  overlay.classList.add("open");
+  document.getElementById("modalClose").focus();
+}
+function closeModal() { overlay.classList.remove("open"); }
+
+document.getElementById("modalClose").addEventListener("click", closeModal);
+overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && overlay.classList.contains("open")) closeModal(); });
+
+// ---- mobile header collapse (give the canvas more room) ----
+const headerEl = document.querySelector("header");
+const hdrToggle = document.getElementById("hdrToggle");
+function applyHeaderState(collapsed) {
+  headerEl.classList.toggle("details-collapsed", collapsed);
+  hdrToggle.setAttribute("aria-expanded", String(!collapsed));
+  hdrToggle.textContent = collapsed ? "Show details" : "Hide details";
+  setTimeout(fit, 80);
+}
+hdrToggle.addEventListener("click", () =>
+  applyHeaderState(!headerEl.classList.contains("details-collapsed")));
+if (window.matchMedia("(max-width: 760px)").matches) applyHeaderState(true);
+else hdrToggle.textContent = "Hide details";
+
+// ---- header text from PAGE_META ----
+document.title = PAGE_META.title || "Concept map";
+document.getElementById("pgEyebrow").textContent = PAGE_META.eyebrow || "";
+document.getElementById("pgTitle").textContent = PAGE_META.title || "";
+document.getElementById("pgSub").textContent = PAGE_META.sub || "";
+
+update(root);
+requestAnimationFrame(() => requestAnimationFrame(fit));
+window.addEventListener("load", () => setTimeout(fit, 50));
+window.addEventListener("resize", () => setTimeout(fit, 120));
+</script>
+</body>
+</html>

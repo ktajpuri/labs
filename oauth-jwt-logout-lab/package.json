@@ -1,0 +1,9 @@
+{
+  "name": "oauth-jwt-logout-lab",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2"
+  }
+}
