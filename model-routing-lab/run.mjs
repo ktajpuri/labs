@@ -4,6 +4,7 @@ import { runLocalModel, DEFAULT_MODEL } from "./src/localModel.mjs";
 import { callClaude, callClaudeExtraction } from "./src/claude.mjs";
 import { gradeStructural, gradeWithJudge } from "./src/grader.mjs";
 import { runVerifier } from "./src/verifier.mjs";
+import { routeQuery, routeQueryDry, classifyQuery, classifyQueryV2 } from "./src/router.mjs";
 import {
   TRIVIAL_LLM_SYSTEM_PROMPT,
   SIMPLE_EXTRACTION_SYSTEM_PROMPT,
@@ -301,6 +302,81 @@ async function scenarioS10(threshold = 0.7) {
   );
 }
 
+// ---------- S11-dry: classification only, no LLM/API calls (free steady-state check) ----------
+function scenarioS11Dry(classifier = classifyQuery, headerLabel) {
+  printHeader(headerLabel ?? "S11-dry: router classification only (free) — all 30 queries, mixed, no tier hint used");
+  let matches = 0;
+  for (const q of golden.queries) {
+    const { bucket } = routeQueryDry(q.text, classifier);
+    const bucketToRoute = { code_path: "code_path", extraction: "local_model", dispute: "sonnet", complex: "opus" };
+    const predictedRoute = bucketToRoute[bucket];
+    const expected = q.gold.expected_route;
+    const match = predictedRoute === expected;
+    if (match) matches++;
+    console.log(
+      `${match ? "✓" : "✗"} ${q.id.padEnd(4)} tier=${q.tier.padEnd(7)} predicted=${predictedRoute.padEnd(9)} expected=${expected}`,
+    );
+  }
+  console.log(`\n--- predicted-route match: ${matches}/${golden.queries.length} (${((matches / golden.queries.length) * 100).toFixed(1)}%) ---\n`);
+}
+
+// ---------- S11 CORE: full end-to-end router, all 30 queries mixed, no oracle tier label ----------
+async function scenarioS11(classifier = classifyQuery, headerLabel) {
+  printHeader(headerLabel ?? "S11 CORE: end-to-end router — all 30 queries, mixed order, no tier hint used at dispatch time");
+  const rows = [];
+  let routeMismatches = 0;
+  for (const q of golden.queries) {
+    const result = await routeQuery(q, classifier);
+    let correct;
+    if (q.gold.type === "structural") {
+      const grade = gradeStructural(result.fields, q.gold.expected_fields);
+      correct = grade.correct;
+      result.note += grade.correct ? "" : ` | ${grade.details.join("; ")}`;
+    } else {
+      const grade = await gradeWithJudge(q.text, q.gold.expected_outcome, result.responseText);
+      correct = grade.correct;
+      result.inputTokens += grade.judgeInputTokens;
+      result.outputTokens += grade.judgeOutputTokens;
+      result.costUSD += grade.judgeCostUSD;
+      result.note += grade.correct ? "" : ` | judge: ${grade.reason}`;
+    }
+    const expectedRoute = q.gold.expected_route;
+    const actualRouteNormalized = result.route === "sonnet(esc)" ? "local_model" : result.route === "local" ? "local_model" : result.route;
+    const routeMatch = actualRouteNormalized === expectedRoute;
+    if (!routeMatch) routeMismatches++;
+    const row = {
+      id: q.id,
+      tier: q.tier,
+      route: result.route,
+      correct,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      costUSD: result.costUSD,
+      latencyMs: result.latencyMs,
+      note: `expected_route=${expectedRoute} ${routeMatch ? "" : "ROUTE-MISMATCH"} ${result.note}`,
+    };
+    printRow(row);
+    rows.push(row);
+  }
+  printTotals(rows);
+  console.log(`--- route mismatches (actual tier != expected_route): ${routeMismatches}/${rows.length} ---\n`);
+}
+
+// ---------- S12-dry / S12: same router, classifyQueryV2 (fixes S05's zip-code false trigger) ----------
+function scenarioS12Dry() {
+  return scenarioS11Dry(
+    classifyQueryV2,
+    "S12-dry: router classification only (free), classifyQueryV2 — zip-code false-trigger fix",
+  );
+}
+
+async function scenarioS12() {
+  return scenarioS11(
+    classifyQueryV2,
+    "S12 CORE: end-to-end router with classifyQueryV2 — zip-code false-trigger fix, all 30 queries mixed",
+  );
+}
+
 function mkRow(q, route, correct, r, note) {
   return {
     id: q.id,
@@ -332,6 +408,10 @@ const SCENARIOS = {
   s8: scenarioS8,
   s9: scenarioS9,
   s10: () => scenarioS10(threshold),
+  "s11-dry": scenarioS11Dry,
+  s11: scenarioS11,
+  "s12-dry": scenarioS12Dry,
+  s12: scenarioS12,
 };
 
 const fn = SCENARIOS[scenario];

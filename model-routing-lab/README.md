@@ -46,6 +46,13 @@ node --env-file=../.env run.mjs s4                    # CORE: confidence calibra
 node --env-file=../.env run.mjs s5                    # verifier-based escalation
 node --env-file=../.env run.mjs s6                    # control: local vs Opus
 node --env-file=../.env run.mjs s7                    # threshold sweep 0.5/0.7/0.9
+node --env-file=../.env run.mjs s8                    # control: 1B vs 3B local model
+node --env-file=../.env run.mjs s9                    # CORE: confidence calibration, 1B model
+node --env-file=../.env run.mjs s10 --threshold=0.7   # confidence cascade, 1B model
+node --env-file=../.env run.mjs s11-dry               # free: router classification only, no LLM calls
+node --env-file=../.env run.mjs s11                   # CORE: full end-to-end router, all 30 queries mixed
+node --env-file=../.env run.mjs s12-dry               # free: router v2 (fixes S05's zip-code false trigger)
+node --env-file=../.env run.mjs s12                   # CORE: not yet run — outcome inferable from S11, skipped by request
 ```
 
 Every run prints one row per query (tier, route, tokens, cost, latency,

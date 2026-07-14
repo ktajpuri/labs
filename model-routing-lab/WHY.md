@@ -154,3 +154,93 @@ gut-called — S10 in particular was worked out from S9's confidence values befo
 anything. That's the transferable lesson from this session: predictions built by working
 through the mechanism from known data landed correctly; predictions that were closer to
 intuition (S3, S4, S5, S7, S8's 1B estimate) were the ones that missed.
+
+---
+
+## Addendum — end-to-end router lab (new contract, same harness, S11)
+
+**Question:** every prior scenario (S1–S10) tested one tier in isolation against
+pre-labeled queries. What happens with realistic, unlabeled, mixed traffic — a single
+router that has to *decide* which tier handles each query, with no oracle tier hint?
+
+A generic mechanical classifier (order-ID count + dispute-keyword presence — no LLM
+self-report, no hand-tuning to specific golden-set phrases) was built and run over all
+30 queries in mixed order. The free dry-run (classification only, S11-dry) already
+showed 80% route accuracy (24/30) with two distinct blind spots: a **false-positive**
+(a US zip code `10021` matches the same `\b1\d{4}\b` pattern as a real order ID,
+tripping the "≥2 order IDs = complex" signal for a query that's actually simple), and a
+**false-negative** (contradiction-style hard queries like "chat support said X but the
+email says Y" have no mechanical tell — no keyword count can detect "these two sources
+disagree").
+
+**The more important finding came from the paid run (S11): route mismatches and
+accuracy losses are mostly independent events.** 6/30 queries landed on the wrong tier,
+but only 2/30 actually produced a wrong answer. Sending a hard, contradiction-handling
+query to Sonnet instead of Opus (H02, H03, H05) cost nothing three times out of three —
+Sonnet's reasoning quality was good enough for these particular cases even under a
+medium-tier prompt written for simpler disputes. What actually broke correctness were
+the two cases where misrouting changed the **response contract**, not just which model
+reasoned about it:
+
+- **S05** landed on Opus, but under `HARD_SYSTEM_PROMPT` — a prose-only prompt that
+  never asks for a JSON field schema. Opus is more than capable of extracting an
+  address; it was never asked to. The failure is a prompt/schema mismatch caused by
+  routing to the wrong *prompt*, not a capability gap.
+- **H01** landed on the code path (the same false-claim bug as S2), which returns a
+  fixed single-order-status template — structurally incapable of addressing a 3-part
+  dispute regardless of which order it grabbed.
+
+And a genuine surprise: **H06 (also a code-path false claim) was correct anyway** —
+"Order 10999 not found in our system" happens to be exactly what that hard-tier's
+rubric wants, so an architecturally wrong tier produced a right answer by luck. This is
+the mirror image of the lab's original theme: just as a confidence signal can be
+silently wrong, a routing bug can be silently *right*, which is just as important not to
+mistake for "the router is working" — it's one query's luck, not evidence the code path
+generalizes to multi-issue disputes.
+
+**The reframe this adds to the lab's core claim:** the original contract (S1–S10) was
+about whether a *signal* (confidence) reliably predicts correctness. This contract shows
+a second, distinct place a tiered router can go wrong that has nothing to do with signal
+calibration — whether the tier a query lands on can even *produce the right shape of
+answer*. A router can have a well-calibrated escalation signal and still ship wrong
+answers if the fallback/escalation path swaps in a prompt or code path that structurally
+can't emit what the grader (or the customer) needs.
+
+### Updated prediction scorecard (S11 only)
+
+| Scenario | Verdict |
+|---|---|
+| S11-dry | No prediction requested (free steady-state check) |
+| S11 | Wrong — predicted 30/30 with S05 and H06 both correct; actual 28/30, and the two real misses were S05 and H01, not S05 and H06 (H06 was correct; H01 was the second miss). |
+
+Combined across all three contracts in this session: 2 fully correct (S6, S10) / 9
+scored scenarios, 4 partial, 2 wrong, 2 void.
+
+---
+
+## Addendum — S12, fixing S05's zip-code false trigger (dry-run only, no paid confirmation)
+
+S11 found that a bare US zip code (`10021`) matches the same `\b1\d{4}\b` shape as a
+real order ID, and the router's "≥2 order IDs mentioned = complex" rule counted it
+alongside the real order (`10321`) in S05, sending a simple address-update query to
+Opus under a prose-only prompt that never asked for structured output. The fix
+(`classifyQueryV2`) doesn't try to enumerate real zip codes — it excludes any
+order-ID-shaped token immediately preceded by a bare 2-letter state abbreviation, which
+is the actual positional cue that distinguishes "order 10321" from "NY 10021" in every
+address in this golden set.
+
+The free dry-run confirmed the fix is surgical: route-match went from 24/30 to 25/30,
+changing exactly S05 and nothing else — H04 (the one query that legitimately mentions
+two real order IDs) still classifies correctly as complex, so the exclusion rule isn't
+over-firing.
+
+**The paid confirmation run (S12) was deliberately not executed**, by explicit user
+decision, on the grounds that the outcome is already inferable: S11 established S05's
+*only* failure mode was landing on the wrong prompt/tier, not a capability gap, and
+fixing the classification routes it back through the exact local-model cascade already
+validated for this query set in S3/S6/S8. Spending real money to re-confirm a
+deterministic consequence of data already on hand would repeat, in reverse, the
+S2/S9 steady-state-aliasing mistake this lab already learned from. This is itself a
+useful transferable habit: **the same discipline that says "don't ask for a prediction
+on data you've already seen" also says "don't spend to re-verify an outcome you can
+already derive."**
