@@ -12,6 +12,58 @@
 
 ---
 
+## dist-txn-lab
+
+### [dist-txn-A1]
+- lab: dist-txn-lab
+- type: A
+- last_asked: —
+- q: A transfer service commits a debit on DB-A then a credit on DB-B as two plain commits. A crash between them left the system 100 short; your harness showed an operator rerun then produced 800/1100 — still 100 short, alice double-debited. The team's runbook fix is "on partial failure, re-run the transfer job." Drill.
+- ref: A retry of a non-atomic dual-write can't repair it because the retry has no way to know which half already happened — it re-executes both halves, double-applying the one that succeeded (the harness's 900/1000 → 800/1100, invariant violated both times). The gap is structural: no ordering of independent commits is atomic, and no blind retry fixes it. Real fixes change the shape: an atomic commitment protocol (2PC), a saga with compensations, or at minimum idempotency keys per step so a retry becomes a no-op on the half that already ran.
+- grade_note: targets Decision (blind retry double-applies) + Road Not Taken (2PC / saga / idempotency keys). Miss = endorsing rerun, or a fix that doesn't address which-half-already-happened.
+
+### [dist-txn-A2]
+- lab: dist-txn-lab
+- type: A
+- last_asked: —
+- q: Ops finds prepared transactions from a dead coordinator sitting on a Postgres participant, writers timing out behind their locks. The proposed runbook: "old prepared txns are stale garbage — ROLLBACK PREPARED anything older than 10 minutes." Using the lab's S3/S4 pair, drill.
+- ref: S3 and S4 were byte-identical from the participant's view — both prepares voted YES, coordinator silent — yet one was globally uncommitted (no decision on record → presumed abort correct) and the other was COMMITTED (decision logged; recovery must roll FORWARD). A participant-side age heuristic can't distinguish them; blind rollback of a decided-commit txn breaks atomicity exactly when the other participant already committed (XA calls this heuristic damage). The runbook must consult the coordinator's decision log — the log write IS the commit point — and only presume abort when no decision exists.
+- grade_note: targets Decision (age is not evidence of global state) + mechanism (commit point = coordinator log write, participants indistinguishable). Miss = endorsing age-based rollback, or not naming the coordinator log as the arbiter.
+
+### [dist-txn-A3]
+- lab: dist-txn-lab
+- type: A
+- last_asked: —
+- q: During a 2PC in-doubt incident, monitoring shows all read dashboards green — balance queries returning instantly — so the team downgrades severity, reasoning "the locks are only theoretical, reads are fine." Your harness's contender told a different story. Drill.
+- ref: Both observations are correct and the conclusion is wrong: MVCC serves readers the pre-transaction row version, so SELECTs never queue behind an in-doubt txn's locks — but every WRITER needing those rows blocks (the harness's contender burned its full 5s lock_timeout and failed), and the hold is UNBOUNDED: no timeout, no vacuum relief, survives participant restarts (the vote is a WAL write in pg_twophase), until a coordinator decision arrives. Read-path health is structurally blind to this failure; severity must be judged on writer latency/lock waits (pg_locks, blocked-writer counts), and the unbounded-quiet-damage mode is exactly why max_prepared_transactions defaults to 0.
+- grade_note: targets Untouched (MVCC hides the damage from read metrics) + Ceiling (locks unbounded until decision). Miss = agreeing reads-green means low severity, or expecting the locks to expire on their own.
+
+### [dist-txn-B1]
+- lab: dist-txn-lab
+- type: B
+- last_asked: —
+- q: (Predict) A Postgres participant holds a prepared 2PC transaction (voted YES, coordinator dead) and the container is restarted. Predict: does the prepared txn survive in pg_prepared_xacts, are its row locks still held, and what mechanism decides — contrast with an ordinary open transaction under the same restart.
+- ref: It survives with locks intact — the harness's prepared txn reappeared after docker restart with its age ticking uninterrupted from the original prepare — because PREPARE TRANSACTION writes the transaction's complete state to the WAL (pg_twophase) BEFORE answering YES: the vote is itself a durable write, a promise that must survive anything a commit would survive. An ordinary open transaction is connection-bound memory state and is simply aborted by the restart. That asymmetry is the whole point of the prepare phase.
+- grade_note: essential = survives with locks + WAL/pg_twophase durable-vote mechanism + ordinary-txn contrast. Miss = predicting the restart clears it, or no durable-write mechanism.
+
+### [dist-txn-B2]
+- lab: dist-txn-lab
+- type: B
+- last_asked: —
+- q: (Explain-mechanism) A saga's step 2 fails and compensation restores all balances. Explain why "the saga rolled back" is the wrong sentence — what does the database history actually contain vs a 2PC abort — and why a reader that acted during the gap can never detect it acted on "wrong" data.
+- ref: Nothing rolled back: T1 was a real local commit, visible to everyone the instant it landed, and the compensation C1 is a second, forward-running committed transaction that happens to net T1 to zero — the harness showed two committed txns on bank-a where 2PC's abort path left zero history. Because the intermediate state (total=1900, ~15s in the harness) was genuine committed data, any reader's decision made on it was correct AT THE TIME by the database's own account, and after C1 no marker distinguishes the window from normal state — sagas trade isolation away, and the anomaly is undetectable after the fact.
+- grade_note: essential = compensation is a new committed txn (not undo), 2PC-abort-leaves-no-history contrast, window state is real committed data with no after-the-fact marker. Miss = describing compensation as rollback, or claiming the anomaly is detectable later.
+
+### [dist-txn-B3]
+- lab: dist-txn-lab
+- type: B
+- last_asked: —
+- q: (Boundary) Same transfer, same failure timing (remote step fails / coordinator dies mid-protocol). State what an unrelated writer needing the debited row experiences under 2PC vs under a saga, with the lab's numbers — and name the single design property each behavior is the price of.
+- ref: Under 2PC the writer blocks behind the in-doubt txn's locks until its lock_timeout kills it (harness: full 5,009 ms burned, then error) — the price of atomicity-with-isolation: locks must span the global decision, and the decision can be arbitrarily late. Under a saga the writer succeeds in single-digit ms even mid-anomaly (harness: 2–4 ms repeatedly inside the 15 s window) — nothing holds locks between steps, but the price is that the writer (and every reader) is operating on intermediate state that compensation may later net away. Blocking and lost isolation are the two ends of the same dial; there is no third setting that avoids both without weakening something else (the parking-lot countermeasures — semantic locks, pending states — are partial isolation bought back by hand).
+- grade_note: essential = blocked-until-timeout vs instant-success with the price named on each side (atomicity/isolation ↔ availability/lost isolation). Miss = describing either behavior without its price, or claiming a free third option.
+
+---
+
 ## model-routing-lab
 
 ### [routing-A1]
@@ -101,7 +153,7 @@
 ### [oauthjwt-B2]
 - lab: oauth-jwt-logout-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-16
 - q: (Explain-mechanism) A resource server verifies a JWT purely by checking its RS256 signature against a cached public key, plus its `aud`/`iss`/`exp` claims — no call to the authz server at request time. Explain why "the user logged out" has zero effect on this check, and name the one thing that would give it an effect.
 - ref: The verification path only inspects the token's own bytes and locally-known claims/keys — "logout" is an action recorded entirely in the authz server's separate state (a denylist entry, a revoked refresh-token family), and nothing in the resource server's check path reads that state, so there is no channel for the logout to reach it. The one thing that gives logout an effect is making the resource server consult server-side state per request — e.g. checking the token's `jti` against a live denylist — which necessarily reintroduces the network dependency the stateless design existed to avoid.
 - grade_note: essential = verification checks only the token's own bytes/claims; logout is separate server-side state never consulted by that path; denylist-check is the only lever connecting the two. Miss = asserting logout "should" invalidate it without naming why the current check path structurally can't see it.
@@ -285,7 +337,7 @@
 ### [resilience-B1]
 - lab: resilience-patterns-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-16
 - q: (Predict) An upstream hangs 30% of requests (accepted, never answered). The client has no timeout, a 10-connection budget, rate 20/s, 20 s run. Ops expects a slow leak — gradual degradation over the run. Predict the actual success curve and give the arithmetic.
 - ref: Collapse to success=0 within a few seconds (harness: t=3 s, vs a t=18 s "gradual" prediction — 6× off), then flat zero with no self-recovery. Arithmetic: the hang probability is a per-draw Bernoulli trial over reused sockets, so expected draws-to-hang per socket = 1/p ≈ 3.3 — all 10 sockets are consumed within a couple of socket lifetimes. A hung request without a client timeout is a permanent capacity loss, not a slow leak; a timeout converts it into a fixed-cost retry-the-socket event (stable ~(1−hangProb)×rate).
 - grade_note: essential = per-draw hang over reused sockets, 1/p draws-to-hang, fast total collapse + no recovery. Miss = gradual-decay model or expecting self-recovery.
@@ -429,7 +481,7 @@
 ### [streaming-B3]
 - lab: streaming-agg-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-16
 - q: (Spot-the-flaw) A sink dedupes on `(window_start, event_type)` held in an in-memory Set, and the team calls the pipeline exactly-once. Using the two failure modes the lab actually hit, argue where the claim breaks.
 - ref: (1) The key must be canonical: a duplicate whose timestamp was formatted `…30.000` instead of `…30` silently defeated the dedupe AND evaded rows>1 duplicate detection — a phantom window_start row that only the cnt=999 sentinel caught. (2) The dedup store must be durable: an in-memory seen set dies with the sink process, so a sink restart re-duplicates. Real exactly-once at the store needs a canonical key plus durable idempotency (upsert / ReplacingMergeTree) or a transactional two-phase-commit sink.
 - grade_note: essential = both holes — canonical-key fragility and non-durable dedup state — with their consequences. Miss = either hole absent.
@@ -500,4 +552,4 @@
 
 - **streaming-agg-lab/topk** (Top-K rollup sub-lab): harness built and smoke-tested, README and PLAN.md exist, but no WHY.md / failure matrix yet — Phase 2 scenarios haven't been run. No questions generated; add `topk-A*/B*` entries here once its WHY.md lands.
 
-All eight top-level lab folders (model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, storage-layout-lab, streaming-agg-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.
+All nine top-level lab folders (dist-txn-lab, model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, storage-layout-lab, streaming-agg-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.

@@ -1,0 +1,24 @@
+services:
+  bank-a:
+    image: postgres:16
+    container_name: bank-a
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+      POSTGRES_DB: bank_a
+    # max_prepared_transactions defaults to 0 in Postgres (2PC disabled!).
+    # Flip via: MAX_PREPARED=0 docker compose up -d --force-recreate
+    command: postgres -c max_prepared_transactions=${MAX_PREPARED:-10}
+    ports:
+      - "55432:5432"
+
+  bank-b:
+    image: postgres:16
+    container_name: bank-b
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+      POSTGRES_DB: bank_b
+    command: postgres -c max_prepared_transactions=${MAX_PREPARED:-10}
+    ports:
+      - "55433:5432"
