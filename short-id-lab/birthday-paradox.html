@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Birthday Paradox — why collisions arrive at √D</title>
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --panel: #ffffff;
+    --ink: #1c1b1a;
+    --muted: #6b6660;
+    --line: #e6e2db;
+    --accent: #b4491f;
+    --accent-soft: #f6e9e2;
+    --good: #2f7d4f;
+    --good-soft: #e6f1ea;
+    --bad: #b4491f;
+    --bad-soft: #f7e7df;
+    --code-bg: #f3f0ea;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16150f;
+      --panel: #1f1e17;
+      --ink: #ece8df;
+      --muted: #9c968b;
+      --line: #33312a;
+      --accent: #e6935f;
+      --accent-soft: #2c2318;
+      --good: #7fc79b;
+      --good-soft: #1c271f;
+      --bad: #e6935f;
+      --bad-soft: #2c2318;
+      --code-bg: #26241d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16150f; --panel: #1f1e17; --ink: #ece8df; --muted: #9c968b;
+    --line: #33312a; --accent: #e6935f; --accent-soft: #2c2318;
+    --good: #7fc79b; --good-soft: #1c271f; --bad: #e6935f; --bad-soft: #2c2318;
+    --code-bg: #26241d;
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfaf7; --panel: #ffffff; --ink: #1c1b1a; --muted: #6b6660;
+    --line: #e6e2db; --accent: #b4491f; --accent-soft: #f6e9e2;
+    --good: #2f7d4f; --good-soft: #e6f1ea; --bad: #b4491f; --bad-soft: #f7e7df;
+    --code-bg: #f3f0ea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 4rem 1.5rem 6rem; }
+  header { margin-bottom: 3rem; }
+  .kicker {
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 1rem;
+  }
+  h1 {
+    font-family: var(--serif); font-weight: 600; font-size: clamp(2rem, 5vw, 2.9rem);
+    line-height: 1.1; margin: 0 0 1rem; letter-spacing: -0.01em;
+  }
+  .lede {
+    font-family: var(--serif); font-size: 1.2rem; color: var(--muted);
+    line-height: 1.55; margin: 0;
+  }
+  h2 {
+    font-family: var(--serif); font-weight: 600; font-size: 1.5rem;
+    margin: 3.2rem 0 1rem; letter-spacing: -0.01em;
+    padding-top: 1.6rem; border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 1.05rem; margin: 2rem 0 0.6rem; }
+  p { margin: 0 0 1.1rem; }
+  a { color: var(--accent); }
+  code {
+    font-family: var(--mono); font-size: 0.86em;
+    background: var(--code-bg); padding: 0.1em 0.4em; border-radius: 4px;
+  }
+  strong { font-weight: 650; }
+  .callout {
+    background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); border-radius: 8px;
+    padding: 1.2rem 1.4rem; margin: 1.6rem 0;
+  }
+  .callout .label {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 0.5rem;
+  }
+  .rule {
+    background: var(--accent-soft); border-radius: 10px;
+    padding: 1.4rem 1.5rem; margin: 1.8rem 0;
+    text-align: center;
+  }
+  .rule .formula {
+    font-family: var(--mono); font-size: 1.35rem; color: var(--ink);
+    font-weight: 600; margin-bottom: 0.4rem;
+  }
+  .rule .gloss { font-size: 0.9rem; color: var(--muted); }
+  .math {
+    font-family: var(--mono); background: var(--code-bg);
+    border-radius: 8px; padding: 1rem 1.2rem; margin: 1.2rem 0;
+    font-size: 0.9rem; overflow-x: auto; line-height: 1.9;
+  }
+  table {
+    width: 100%; border-collapse: collapse; margin: 1.4rem 0;
+    font-size: 0.9rem;
+  }
+  .scroll { overflow-x: auto; }
+  th, td {
+    text-align: left; padding: 0.6rem 0.7rem;
+    border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  th {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--muted); font-weight: 600;
+  }
+  td.num { font-family: var(--mono); white-space: nowrap; }
+  .tag {
+    display: inline-block; font-family: var(--mono); font-size: 0.72rem;
+    padding: 0.15em 0.55em; border-radius: 20px; font-weight: 600;
+  }
+  .tag.good { background: var(--good-soft); color: var(--good); }
+  .tag.bad { background: var(--bad-soft); color: var(--bad); }
+  .grid { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; margin: 1.4rem 0; }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 1.1rem 1.2rem;
+  }
+  .card h4 {
+    margin: 0 0 0.5rem; font-size: 0.95rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .card p { font-size: 0.88rem; color: var(--muted); margin: 0; }
+  .card .icon { font-size: 1.1rem; }
+  ul { margin: 0 0 1.1rem; padding-left: 1.2rem; }
+  li { margin-bottom: 0.5rem; }
+  .footer {
+    margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+    font-size: 0.82rem; color: var(--muted);
+  }
+  .footer code { font-size: 0.8rem; }
+  .intuition-toggle { margin: 1.4rem 0; }
+  .flip {
+    display: flex; gap: 0; border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden; margin: 1.4rem 0;
+  }
+  .flip > div { flex: 1; padding: 1.1rem 1.2rem; }
+  .flip .naive { background: var(--bad-soft); }
+  .flip .real { background: var(--good-soft); }
+  .flip h4 { margin: 0 0 0.5rem; font-size: 0.8rem; font-family: var(--mono);
+    text-transform: uppercase; letter-spacing: 0.06em; }
+  .flip .naive h4 { color: var(--bad); }
+  .flip .real h4 { color: var(--good); }
+  .flip p { margin: 0; font-size: 0.9rem; }
+  @media (max-width: 560px) { .flip { flex-direction: column; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">short-id-lab · companion note</div>
+  <h1>The Birthday Paradox</h1>
+  <p class="lede">Why a random-ID scheme with 3.5&nbsp;trillion possibilities starts colliding after only a few&nbsp;million&nbsp;IDs — and why that number is the square root of the keyspace, not the keyspace.</p>
+</header>
+
+<p>This note exists because of one wrong prediction in the lab. Scenario S3 drew random 7-character base62 IDs (a keyspace of 62<sup>7</sup> ≈ 3.5 trillion) until the first collision. The prediction was that collisions wouldn't appear until we'd issued something near the keyspace size — roughly 10<sup>13</sup> draws. The harness produced the first collision at draw <strong>4,536,737</strong>. Off by more than five orders of magnitude.</p>
+
+<p>That gap isn't a rounding error or a quirk of the run. It's the birthday paradox, and it's one of the most consequential counting facts in systems design. Getting it wrong is how teams ship ID schemes, hash tables, and dedup keys that quietly break at a scale they thought was decades away.</p>
+
+<div class="flip">
+  <div class="naive">
+    <h4>The naive model</h4>
+    <p>“There are <strong>D</strong> slots. My new draw hits one specific taken slot with probability 1/D. So I'm safe until I've filled a real fraction of D.” → collide near <strong>n ≈ D</strong>.</p>
+  </div>
+  <div class="real">
+    <h4>What actually happens</h4>
+    <p>A collision is <strong>any</strong> two draws matching each other — and the number of <em>pairs</em> grows with n². → collide near <strong>n ≈ √D</strong>.</p>
+  </div>
+</div>
+
+<h2>The classic version</h2>
+<p>In a room of just <strong>23 people</strong>, there's a better-than-even chance two of them share a birthday. With 365 possible birthdays, intuition screams you'd need ~183 people. The answer is 23 because you're not asking “does someone share <em>my</em> birthday?” — you're asking “do <em>any two</em> people match?”</p>
+
+<p>With 23 people there are <code>23 × 22 / 2 = 253</code> distinct pairs of people. Each pair has a 1/365 chance of matching. 253 chances against a 1/365 event tips past 50%. The people grow linearly; the <em>pairs</em> grow quadratically, and pairs are what collide.</p>
+
+<h2>The mechanism, step by step</h2>
+<p>Replace 365 with a general keyspace of size <strong>D</strong>, and “people” with “IDs you've drawn.” After you've drawn <strong>n</strong> IDs:</p>
+
+<div class="math">
+number of pairs among n draws   ≈  n(n−1)/2   ≈  n² / 2<br>
+each pair collides with prob     =  1 / D<br>
+<br>
+expected collisions so far       ≈  (n² / 2) × (1 / D)  =  <strong>n² / 2D</strong>
+</div>
+
+<p>Now ask: at what n does the expected number of collisions reach 1 — i.e. when does the first collision become likely?</p>
+
+<div class="math">
+n² / 2D  =  1<br>
+n²        =  2D<br>
+n         =  √(2D)   ≈  1.41 √D
+</div>
+
+<p>A more precise treatment (accounting for the probability of <em>zero</em> collisions along the way) gives the expected first collision at <strong>n ≈ √(πD/2) ≈ 1.25 √D</strong>. Either way the headline is the same: <strong>the first collision arrives at the scale of √D, not D.</strong></p>
+
+<div class="rule">
+  <div class="formula">first collision ≈ 1.25 × √D</div>
+  <div class="gloss">where D is the size of the keyspace. Halve the exponent, and the “astronomically safe” keyspace shrinks to something you can hit on an ordinary launch day.</div>
+</div>
+
+<h2>What the lab actually measured</h2>
+<p>The predictions used the D-rule (collide near the keyspace). Reality tracked √D across every length:</p>
+
+<div class="scroll">
+<table>
+  <thead>
+    <tr><th>Length</th><th>Keyspace D</th><th>√D rule predicts</th><th>Observed first collision</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="num">5-char</td><td class="num">916,132,832</td><td class="num">~37,900</td><td class="num">8,632 – 70,179 <span style="color:var(--muted)">(9 trials, avg ~35k)</span></td></tr>
+    <tr><td class="num">6-char</td><td class="num">56.8 billion</td><td class="num">~300,000</td><td class="num">402,292</td></tr>
+    <tr><td class="num">7-char</td><td class="num">3.52 trillion</td><td class="num">~2.35 million</td><td class="num">4,536,737</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The 5-char row also shows the other half of the story: the first-collision draw ranged from 8,632 to 70,179 across nine identical trials. The birthday bound predicts the <em>expected</em> collision point, but the distribution around it is wide — so a single trial landing at 2× the mean (like the 7-char run) is ordinary variance, not a broken prediction.</p>
+
+<div class="callout">
+  <div class="label">The control — S4</div>
+  <p>The same formula that condemns the scheme also certifies it. At <strong>100,000</strong> draws into the 7-char space, expected collisions = n²/2D = 10<sup>10</sup> / (7.04×10<sup>12</sup>) ≈ <strong>0.14%</strong>. The lab drew 100k and got exactly <strong>0 collisions</strong>. The value of the birthday bound isn't just “you'll collide sooner than you think” — it's that the collision point is a number you can <em>compute in advance</em> and design against.</p>
+</div>
+
+<h2>Why it feels wrong</h2>
+<p>Human intuition prices risk from a first-person view: “what's the chance something collides with <em>me</em>?” That probability really is small and really does stay small until n ≈ D. But a uniqueness system doesn't care about you specifically — it fails if <em>any</em> two of its members collide, and the count of “any two” pairs explodes quadratically while your first-person odds crawl linearly.</p>
+
+<p>The trap is that √D and D feel like they're in the same ballpark when the numbers are abstract. They are not. For a trillion-item keyspace, √D is a million — a factor of a million apart. The bigger the keyspace, the <em>wider</em> the gap between where you think it breaks and where it actually breaks.</p>
+
+<h2>Where this shows up in the real world</h2>
+
+<div class="grid">
+  <div class="card">
+    <h4><span class="icon">🔗</span> Short IDs &amp; URL shorteners</h4>
+    <p>The lab's own subject. A 7-char code “feels” collision-proof at 3.5T combinations, but collides in the low millions — which is why every serious shortener pairs random IDs with an atomic uniqueness check (or abandons random for structured IDs entirely).</p>
+  </div>
+  <div class="card">
+    <h4><span class="icon">🔐</span> Cryptographic hash attacks</h4>
+    <p>A hash with an <strong>n-bit</strong> output has D = 2<sup>n</sup>, so a birthday collision attack costs only <strong>2<sup>n/2</sup></strong> work — not 2<sup>n</sup>. This is precisely why a 128-bit hash gives only 64 bits of collision resistance, and why MD5 (128-bit) fell to practical collisions. Signature schemes size their digests for the √D attack, not the naive one.</p>
+  </div>
+  <div class="card">
+    <h4><span class="icon">🆔</span> UUIDs &amp; GUIDs</h4>
+    <p>UUIDv4 has 122 random bits (D ≈ 5×10<sup>36</sup>). The birthday math is exactly why that's considered safe without a check: √D is still ~2×10<sup>18</sup>, so you'd generate a billion per second for a century before a meaningful collision chance. The keyspace is chosen so that even √D is astronomical.</p>
+  </div>
+  <div class="card">
+    <h4><span class="icon">🌳</span> Git commit SHAs</h4>
+    <p>Git abbreviates SHA-1 hashes to ~7 hex chars in output, but stores the full 160 bits precisely because √(2<sup>160</sup>) = 2<sup>80</sup> is the real collision frontier. The 2017 SHAttered attack manufactured a SHA-1 collision, prompting the migration toward SHA-256.</p>
+  </div>
+  <div class="card">
+    <h4><span class="icon">📊</span> Hash tables &amp; sharding</h4>
+    <p>Collisions in a hash table aren't a bug, they're expected once inserted keys approach √(bucket count). It's why load factors are kept low and why “I have way more buckets than keys” doesn't mean “no collisions.”</p>
+  </div>
+  <div class="card">
+    <h4><span class="icon">🎲</span> Session tokens &amp; nonces</h4>
+    <p>Any system minting random tokens without a uniqueness check is implicitly betting that traffic stays below √D for the token's lifetime. Under-size the token and a high-volume service reissues a live session token to a second user — a security bug, not just a data one.</p>
+  </div>
+</div>
+
+<h2>The design takeaways</h2>
+<ul>
+  <li><strong>Size keyspaces against √D, not D.</strong> If you need to safely issue <em>N</em> random IDs, your keyspace must be well beyond <em>N²</em>, not beyond <em>N</em>. Halving the exponent is the whole game.</li>
+  <li><strong>Random uniqueness always needs one of two things:</strong> a keyspace so large that even √D dwarfs your lifetime volume (UUIDv4), <em>or</em> an atomic collision check at the write (the lab's S5 — a <code>UNIQUE</code> constraint, never a read-then-insert).</li>
+  <li><strong>The collision point is computable.</strong> <code>expected collisions ≈ n²/2D</code> lets you answer “are we safe at our volume?” with arithmetic, before it's an incident. Plug in your real issued-ID count and keyspace.</li>
+  <li><strong>Structured IDs sidestep the bet entirely.</strong> Snowflake-style IDs (<code>time | worker | sequence</code>) get uniqueness from structure, not from a probabilistic keyspace — no birthday bound to reason about, at the cost of a monotonic-clock dependency (the lab's S7).</li>
+</ul>
+
+<div class="callout">
+  <div class="label">The one sentence to reproduce cold</div>
+  <p>Collisions accumulate by <strong>pairs</strong> (≈ n²/2D), so the first one arrives at <strong>≈ 1.25√D</strong> — the square root of the keyspace. A 3.5-trillion-ID space is really a “few-million-IDs-before-first-collision” space, which is why random short IDs are never shipped without an atomic uniqueness check.</p>
+</div>
+
+<h2>The deeper pattern</h2>
+<p>The birthday bound was one of two prediction misses in this lab, and both had the same root: <strong>underestimating how quantities accumulate.</strong> The birthday miss was collisions accruing by pairs (√D, not D). The other — the Snowflake clock rollback (S7) — was a backward clock step re-issuing IDs across an <em>entire held window</em> (2,972 duplicates, not the ~50 predicted for “one tick”).</p>
+
+<p>Both are the same cognitive trap: the mind models a quantity as growing linearly when it actually compounds — over pairs, over a window, over time. The same trap sits under the coupon-collector problem, queue backlog under sustained overload, and retry-storm amplification. When a prediction feels like it should scale linearly, that's exactly the moment to check whether something is quietly being squared.</p>
+
+<div class="footer">
+  <p>Companion to <code>short-id-lab</code> · see <code>MATRIX.md</code> (S3, S4) and <code>WHY.md</code>. Reproduce the numbers with:</p>
+  <p><code>node idlab.js birthday --chars 5 --trials 3</code> &nbsp;·&nbsp; <code>node idlab.js birthday --chars 7</code> &nbsp;·&nbsp; <code>node idlab.js collcount --chars 7 --n 100000</code></p>
+</div>
+
+</div>
+</body>
+</html>

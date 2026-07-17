@@ -41,7 +41,7 @@
 ### [dist-txn-B1]
 - lab: dist-txn-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-17
 - q: (Predict) A Postgres participant holds a prepared 2PC transaction (voted YES, coordinator dead) and the container is restarted. Predict: does the prepared txn survive in pg_prepared_xacts, are its row locks still held, and what mechanism decides — contrast with an ordinary open transaction under the same restart.
 - ref: It survives with locks intact — the harness's prepared txn reappeared after docker restart with its age ticking uninterrupted from the original prepare — because PREPARE TRANSACTION writes the transaction's complete state to the WAL (pg_twophase) BEFORE answering YES: the vote is itself a durable write, a promise that must survive anything a commit would survive. An ordinary open transaction is connection-bound memory state and is simply aborted by the restart. That asymmetry is the whole point of the prepare phase.
 - grade_note: essential = survives with locks + WAL/pg_twophase durable-vote mechanism + ordinary-txn contrast. Miss = predicting the restart clears it, or no durable-write mechanism.
@@ -145,7 +145,7 @@
 ### [oauthjwt-B1]
 - lab: oauth-jwt-logout-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-17
 - q: (Predict) Given `ACCESS_TTL=N` seconds and `RS_LEEWAY=0`, predict at exactly which elapsed second (measured from `iat`) a valid token's status flips from 200 to 401, and name the comparison operator responsible.
 - ref: Flips at t=N, not t=N+1 — the boundary trips the instant N whole seconds have elapsed. `jsonwebtoken`'s expiry check is `clockTimestamp >= exp` (a `>=`, not `>`), and `exp = iat + N`. The lab's own per-second polling loop showed this precisely for N=60: `t+59s → 200`, `t+60s → 401` — the original in-session prediction of "flips at t=61" was off by exactly one second for missing this operator.
 - grade_note: essential = flip at t=N not N+1, and naming the `>=` comparison as the mechanism. Miss = predicting t=N+1, or describing the boundary as gradual/fuzzy rather than a single-second step.
@@ -496,6 +496,58 @@
 
 ---
 
+## short-id-lab
+
+### [shortid-A1]
+- lab: short-id-lab
+- type: A
+- last_asked: —
+- q: A URL shortener uses random 7-char base62 ids (keyspace 62^7 ≈ 3.5 trillion) with a read-then-insert collision check. A teammate argues "at 3.5 trillion possibilities we won't collide until we've issued hundreds of billions of ids, so the collision check is defensive over-engineering we can drop." Your lab's S3 run put the first collision at draw ~4.5 million. Drill.
+- ref: The birthday bound demolishes the "safe until ≈ keyspace" intuition: a collision is ANY pair of issued ids matching, and after n ids there are ≈ n²/2 pairs each colliding with probability 1/D, so expected collisions ≈ n²/2D — reaching 1 at n ≈ √(2D), i.e. first collision at ≈ 1.25·√D, not ≈ D. For 62^7 that's a few million ids (lab: 4,536,737), not hundreds of billions — 5+ orders of magnitude sooner. The check is load-bearing, not defensive; dropping it guarantees silent duplicate ids once traffic reaches √D scale. (Corollary from the S4 control: the same bound proves safety cheaply — at 100k ids, n²/2D ≈ 0.14%, so the failure point is computable, not vague.)
+- grade_note: targets Number (√D not D as the collision scale) + Decision (the check is required, not optional). Miss = endorsing "safe until we approach the keyspace," or not naming the pairs/n²-2D mechanism.
+
+### [shortid-A2]
+- lab: short-id-lab
+- type: A
+- last_asked: —
+- q: To make random-id inserts safe under load, a service generates a candidate, does `SELECT ... WHERE id = ?` to check it's free, and if free does `INSERT`. Code-reviewed, ships. Your S5 harness ran this at concurrency 50 and the check fired 801 times yet 12 duplicate ids still landed in the table. The team's fix proposal: "add a retry loop around the whole check-then-insert." Drill.
+- ref: This is a TOCTOU (time-of-check-to-time-of-use) race and a retry around the same two-step doesn't close it: the SELECT and the INSERT are separate round trips, so two lanes can both SELECT "free" for the same candidate in the gap before either INSERTs — the check is structurally blind to an in-flight insert. Wrapping it in a retry just re-runs the same racy window. The fix moves the uniqueness decision INTO the atomic write: a UNIQUE/PRIMARY KEY constraint, so one insert wins and the other gets a constraint violation to catch-and-regenerate (lab: unique mode = 0 dupes, 14 constraint retries — same races, now visible and safe). The check belongs where the write commits, not in app code before it.
+- grade_note: targets Decision (TOCTOU can't be fixed by app-level retry) + Road Not Taken (UNIQUE constraint moves the check into the atomic write). Miss = accepting the read-then-insert-with-retry, or not naming the two-round-trip gap.
+
+### [shortid-A3]
+- lab: short-id-lab
+- type: A
+- last_asked: —
+- q: A Snowflake-style id service (ms timestamp | worker id | 12-bit sequence) runs fine for months. An NTP correction steps one node's clock back 100 ms. Your S7 harness reproduced this: the naive generator issued 2,972 duplicate ids from that single rollback. A teammate is surprised — "a 100 ms rollback should at most re-collide one millisecond's worth of ids, maybe a few dozen." Drill the number and the fix.
+- ref: The clock steps back and STAYS back, so the generator re-traverses the ENTIRE 100 ms window it already used — not one tick. At the harness's ~50 ids/ms that's ~5,000 ids re-issued at already-visited timestamps, ~2,972 of which exactly reproduce a prior (timestamp, worker, sequence) triple. The "one tick" intuition undercounts by ~60×. The only correct fix is to make the generator refuse to emit while `ts < lastTs` — stall until the wall clock catches back up (lab guard mode: 88 ms stalled, 0 duplicates). Snowflake buys away coordination and the keyspace gamble, but the price is a hard dependency on a monotonic clock; non-monotonicity (NTP steps, VM live-migration, leap-second smear) must halt generation, not proceed.
+- grade_note: targets Number (rollback re-traverses the whole held window, not one tick — ~60× undercount) + Decision (stall-on-regression is the only safe response). Miss = accepting "a few dozen," or a fix that keeps emitting through the rollback.
+
+### [shortid-B1]
+- lab: short-id-lab
+- type: B
+- last_asked: —
+- q: (Predict) Random base62 ids are drawn uniformly, one at a time, into a set until the first repeat. Predict the order of magnitude of the draw number at which the first collision appears, for a keyspace of size D — and state the rule. Then apply it: 62^5 ≈ 916M, 62^6 ≈ 56.8B, 62^7 ≈ 3.5T.
+- ref: First collision at ≈ 1.25·√D (birthday bound), NOT near D — collisions accumulate by pairs (≈ n²/2 pairs after n draws, each matching with prob 1/D, so expected collisions ≈ n²/2D, hitting 1 at n ≈ √(2D)). So: 62^5 → ~35k (lab: 8.6k–70k across 9 trials); 62^6 → ~300k (lab: 402,292); 62^7 → ~2.35M mean (lab single trial: 4,536,737, within normal tail variance — the distribution is wide). The naive "safe until draws ≈ D" rule overestimates by ~√D, i.e. 4–5 orders of magnitude here.
+- grade_note: essential = ≈√D scale (not D) + the pairs/n²-2D mechanism + roughly correct per-length magnitudes. Miss = predicting collisions near D, or no pairs-based reasoning.
+
+### [shortid-B2]
+- lab: short-id-lab
+- type: B
+- last_asked: —
+- q: (Boundary) A single-worker Snowflake generator has a 12-bit per-ms sequence (4,096 ids/ms ceiling) and runs on a box that generates ~1.86M simple ids/s. Predict the max ids that actually land in any one millisecond when generating 50k ids flat-out, and whether the total wall time is set by the sequence ceiling or by something else.
+- ref: The 4,096/ms ceiling is only reached if the generator can produce >4.096M ids/s; at ~1.86M/s it emits only ~1,862 ids per ms, well under the ceiling — so most milliseconds never fill, and the ceiling is NOT the binding constraint (lab: max 4,096/ms was hit in only 6 of 20 ms buckets). Wall time is set by generator THROUGHPUT (CPU-bound, ~1.86M/s → 26.8 ms for 50k), roughly 2× the naive "50k ÷ 4,096 = 13 ms" ceiling estimate. The sequence ceiling is a floor on time; real single-process throughput binds first.
+- grade_note: essential = actual per-ms count set by throughput (~1,862) not the 4,096 ceiling + wall time bound by throughput, ceiling is only a floor. Miss = assuming every ms fills to 4,096, or that the sequence ceiling sets the wall time.
+
+### [shortid-B3]
+- lab: short-id-lab
+- type: B
+- last_asked: —
+- q: (Explain-mechanism) A URL shortener uses a sequential base62 counter (aaaaaaa, aaaaaab, ...). Single-process it produces 100k perfectly-unique ids in ~10 ms with zero collisions. Explain why this scheme, despite flawless uniqueness and speed, is unsafe for public short links — and separately why it breaks the moment you run two generators.
+- ref: Two independent failures. (1) Enumerability/leakage: the id IS the sequence number, so anyone holding one id can compute the exact next and previous ids (lab: from `aaaajMW`, predicted next/prev both matched) AND read the total volume issued off any single id (its own sequence number, 37,001) — a competitor scrapes every link ever issued and reads your growth rate from one link. (2) Coordination: uniqueness lives in one shared counter, so two uncoordinated generators each replay the identical sequence from aaaaaaa (lab: 15,000 dupes in 20,000 = 75%); fixing it needs one atomic counter (a serialized disk-backed round trip per id), which cut throughput ~700× (10M/s → 14.6k/s). The counter's guarantee lives in a single coordination point you pay for on every id.
+- grade_note: essential = enumerability/volume-leak (id = sequence number) + the two-generator collision needing a single coordination point at a throughput cost. Miss = citing only one of the two failures, or treating single-process uniqueness as sufficient for public ids.
+
+---
+
 ## workload-bounds
 
 ### [workload-A1]
@@ -552,4 +604,4 @@
 
 - **streaming-agg-lab/topk** (Top-K rollup sub-lab): harness built and smoke-tested, README and PLAN.md exist, but no WHY.md / failure matrix yet — Phase 2 scenarios haven't been run. No questions generated; add `topk-A*/B*` entries here once its WHY.md lands.
 
-All nine top-level lab folders (dist-txn-lab, model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, storage-layout-lab, streaming-agg-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.
+All ten top-level lab folders (dist-txn-lab, model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, short-id-lab, storage-layout-lab, streaming-agg-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.
