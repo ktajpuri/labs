@@ -441,7 +441,7 @@
 ### [streaming-A1]
 - lab: streaming-agg-lab
 - type: A
-- last_asked: —
+- last_asked: 2026-07-17
 - q: Your harness injected 10 events timestamped 25 s in the past (watermark delay 2 s): the window count in ClickHouse didn't move, and Flink's `numLateRecordsDropped` rose by exactly 1 — not 10. The team wants to alert on that metric to quantify late-data loss. Drill.
 - ref: Late events past the watermark are dropped silently — they never reach the OLAP store, and the drop metric is the ONLY trace. But it counts dropped PARTIALS, not raw events: Flink's two-phase window aggregation (LocalWindowAggregate → GlobalWindowAggregate) pre-combines same-window/same-key records before the late check, so 10 raw events register as 1. The metric is a lower bound / nonzero tripwire, not a loss count — sizing actual loss needs ground-truth reconciliation.
 - grade_note: targets Number (the +1 vs +10 mechanism: pre-aggregated partials) + Untouched (metric as lower bound, not a count). Miss = treating the metric as a raw-event loss count.
@@ -449,7 +449,7 @@
 ### [streaming-A2]
 - lab: streaming-agg-lab
 - type: A
-- last_asked: —
+- last_asked: 2026-07-17
 - q: To stop late drops the team flips the watermark delay 2 s → 30 s. Your harness confirmed the 25 s-late events then counted — and every window became queryable ~30 s after it ends instead of ~2 s, still emitted exactly once (rows=1). The dashboard's freshness SLA is 10 s. Drill the decision.
 - ref: The watermark delay is a completeness↔latency dial: widening it makes late events count, but the window is WITHHELD until the watermark passes end+delay, then emitted once, final — state is held to delay publishing, not to revise a published number. First-order cost is latency (every window now 30 s stale, breaching the 10 s SLA); memory is the second-order cost. The decision must trade measured lateness distribution against the freshness SLA, not just flip the dial to maximum.
 - grade_note: targets Decision + Tiebreaker (latency is the first-order cost; withheld-not-revised emission). Miss = believing windows are emitted then revised, or missing the freshness cost.
@@ -457,7 +457,7 @@
 ### [streaming-A3]
 - lab: streaming-agg-lab
 - type: A
-- last_asked: —
+- last_asked: 2026-07-17
 - q: After a no-checkpoint restart lost ~4 windows, the team enables 10 s checkpointing plus auto-restart and declares the pipeline exactly-once. Your harness's next TaskManager kill produced no gap — but window 08:15:30 landed in ClickHouse with rows=2 for all 4 event types, total 118 ≈ 2×59. Drill.
 - ref: Checkpointing = at-least-once, not exactly-once. It rewinds the source and restores state, so nothing is lost — but any window that fired between the last checkpoint and the crash is recomputed on restore and RE-EMITTED, and a non-idempotent sink writes it twice. Checkpointing protects Flink's state, not the sink. Exactly-once at the store additionally requires an idempotent sink: dedupe on a canonical (window, type) key with durable storage, or upsert/ReplacingMergeTree/transactional writes.
 - grade_note: targets Decision (what checkpointing does and doesn't buy) + Untouched (the sink boundary owns delivery semantics). Miss = equating checkpointing with exactly-once, or no sink-side requirement.
@@ -465,7 +465,7 @@
 ### [streaming-B1]
 - lab: streaming-agg-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-17
 - q: (Predict) Watermark delay is 30 s. An event arrives 25 s late — inside tolerance — for a window whose end time has already passed. Ops expects the already-published ClickHouse row for that window to be updated. What actually happens, and what does `rows` show?
 - ref: Nothing gets updated because nothing was published yet: with a 30 s delay the window is withheld until the watermark (max event_time − 30 s) passes the window end, so the late event is folded in before the single, final emission — rows stays 1. Flink holds state to DELAY publishing, not to change a published number.
 - grade_note: essential = withheld-then-emit-once (vs emit-then-revise), rows=1. Miss = predicting an update or a second row.
@@ -473,7 +473,7 @@
 ### [streaming-B2]
 - lab: streaming-agg-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-17
 - q: (Explain-mechanism) A Flink job with checkpointing OFF is cancelled and resubmitted (latest-offset) after ~15 s while the producer keeps writing to Kafka. Afterwards ClickHouse shows a ~4-window hole, and the first post-restart window is partial (3 of 4 event types, total 25 vs ~60). Explain both artifacts.
 - ref: Without checkpointing a restart loses both the in-flight window state AND Flink's read position; resubmitting at latest-offset skips every event produced during the outage — the events were durable in Kafka the whole time, but Flink's position was not, so the hole is a permanent under-count proportional to total downtime (detect + decide + redeploy, always longer than the naive estimate). The partial boundary window is the latest-offset mid-window rejoin signature: the job starts consuming partway through a window and only sees its tail.
 - grade_note: essential = state AND position lost, latest-offset skipping the outage, loss ∝ total downtime, mid-window rejoin explains the partial. Miss = blaming Kafka for losing data.
@@ -489,7 +489,7 @@
 ### [streaming-B4]
 - lab: streaming-agg-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-17
 - q: (Predict) A blast producer outruns Flink's throughput by orders of magnitude for several minutes, then stops. Predict (a) correctness of the window counts, (b) freshness, (c) what happens after the blast stops — and name the one condition under which data is actually lost.
 - ref: Backpressure is a freshness failure, not a correctness one: (a) counts stay exact (rows=1, no corruption) because events buffer durably in Kafka and event-time windows don't care when processing happens; (b) freshness falls far behind (harness: ~9 min) and consumer lag grows unbounded; (c) lag drains to 0 and freshness recovers once load subsides. Loss only occurs if Kafka retention expires before the backlog drains (retention < drain time). Watch for partition skew while it drains — the lab's lag piled onto one hot partition (2.6M) while another sat idle, so adding consumers can't speed it past the hottest partition.
 - grade_note: essential = correctness preserved / freshness degraded / recovery on subsidence + the retention-vs-drain-time loss condition. Miss = predicting corrupted or permanently lost counts under overload alone.
