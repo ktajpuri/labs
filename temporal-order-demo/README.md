@@ -82,6 +82,80 @@ npm run order -- order-3 79 0
 - Gateway captured **1 charge** — the idempotency key made the retry safe. Temporal gives
   at-least-once activity execution; the idempotent gateway makes the *effect* exactly-once.
 
+## Scenario 4 — payment fails → SAGA compensation (reverse the previous steps)
+No env change, no restart. Charge an amount **≥ $1000** and the gateway hard-declines it
+(`402` — "over limit"). Reserve already happened, so the workflow **unwinds it** and cancels
+the order.
+```
+npm run order -- order-4 5000 0
+```
+What happens (watch Terminal 2 / the UI):
+1. `reserveInventory` succeeds → workflow pushes `releaseInventory` onto its compensation stack.
+2. `chargePayment` → gateway returns **402**. This is a *business* decline: retrying can't fix
+   it, so the activity throws a **non-retryable** `ApplicationFailure` — Temporal fails it on
+   **attempt 1** (no wasted retries), unlike the 503 in Scenario 3.
+3. The workflow catches it and **compensates in reverse (LIFO)**: `releaseInventory(order-4)`
+   → inventory goes back up.
+4. Then `cancelOrder(order-4)` marks the order **CANCELLED**.
+5. Result: `order order-4 cancelled (payment declined ... over limit)`. The workflow ends
+   **Completed** — the saga left the system consistent; cancellation is a clean outcome, not a
+   crash. (Re-throw in `workflows.ts` if you'd rather it show as **Failed** in the UI.)
+
+Verify the rollback:
+```
+curl -s http://localhost:3001/state   # inventory back to 100, status order-4 = CANCELLED
+curl -s http://localhost:3004/state   # count 0 — no charge was ever captured
+```
+
+In the UI, `order-4`'s history shows `reserveInventory` Completed, `chargePayment` **Failed**,
+then `releaseInventory` + `cancelOrder` Completed — the rollback is recorded in history too, so
+**the compensation is itself durable** (kill the worker mid-rollback and it resumes).
+
+**503 vs 402 — retry vs compensate:** a *transient* failure (Scenario 3, 503) is retried
+because retrying helps; a *permanent business* failure (402 here) is compensated because it
+won't. Choosing which is which is the real design decision the saga pattern forces.
+
+> Because compensations run at-least-once too, each one is **idempotent** on the service side
+> (`/release` only frees a live reservation, `/refund` only reverses a live charge). If a later
+> step failed *after* a successful charge (e.g. shipping), the stack would also hold
+> `refundPayment`, and it would run first — reverse order of how the steps were applied.
+
+## Scenario 5 — failure AFTER a successful charge → multi-step rollback
+Same saga, but now the failure lands *later*, so there's **more to unwind**. Charge succeeds,
+then **shipping fails permanently** (`422` — "address undeliverable"), so the workflow must undo
+**both** the charge and the reservation — in reverse.
+```
+# Terminal 1: Ctrl-C, then restart the services with shipping made to fail:
+SHIPMENT_FAIL=1 npm run services
+# Terminal 3:
+npm run order -- order-5 79 0        # amount < 1000, so the charge is captured first
+```
+What happens:
+1. `reserveInventory` ✓ → push `releaseInventory`.
+2. `chargePayment` ✓ (captured at the gateway) → push `refundPayment`.
+3. `shipOrder` → **422**, non-retryable → the workflow catches it.
+4. It unwinds the stack **in reverse (LIFO)** — the mirror of how the steps were applied:
+   `refundPayment(order-5)` **first**, then `releaseInventory(order-5)`.
+5. Then `cancelOrder(order-5)`.
+
+The worker log makes the ordering explicit:
+```
+order order-5 FAILED: shipment failed ... — compensating in reverse (2 step(s))
+  compensating: refundPayment(order-5)
+  compensating: releaseInventory(order-5)
+order order-5 rolled back + CANCELLED
+```
+Verify:
+```
+curl -s http://localhost:3001/state   # inventory back to 100, order-5 = CANCELLED
+curl -s http://localhost:3004/state   # the charge shows refunded:true, count 0 (net zero)
+```
+This is the whole point of the compensation stack: the set of steps to undo depends on **how
+far the workflow got** before it failed. Fail at charge (Scenario 4) → 1 compensation; fail at
+ship (here) → 2, run newest-first.
+
+> Reset shipping afterwards: Ctrl-C Terminal 1 and `npm run services` (without `SHIPMENT_FAIL`).
+
 ## Reset
 ```
 docker compose down -v      # wipes Temporal history (full reset)
@@ -98,3 +172,4 @@ Service state is in-memory — restart `npm run services` to reset inventory/cha
 | `--crash-after` process.exit | Ctrl-C the worker during the durable timer |
 | `--idempotent` charge | the gateway's `idempotency-key` dedup |
 | S5 at-least-once boundary | Scenario 3: activity retried, one charge lands |
+| _(new)_ compensation / rollback | Scenario 4: saga — `try/catch` unwinds a compensation stack in reverse |
