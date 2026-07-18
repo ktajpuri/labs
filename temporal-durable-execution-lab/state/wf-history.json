@@ -1,0 +1,22 @@
+{
+  "events": [
+    {
+      "step": "price",
+      "result": 100
+    },
+    {
+      "step": "reserve",
+      "result": "reserved"
+    },
+    {
+      "step": "charge",
+      "result": {
+        "amount": 100
+      }
+    },
+    {
+      "step": "ship",
+      "result": "shipped"
+    }
+  ]
+}

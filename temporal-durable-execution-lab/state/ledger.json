@@ -1,0 +1,23 @@
+{
+  "inventory": 99,
+  "reservations": [
+    {
+      "orderId": "order-1",
+      "ts": 1784353408479
+    }
+  ],
+  "charges": [
+    {
+      "orderId": "order-1",
+      "amount": 100,
+      "key": "order-1:charge",
+      "ts": 1784353408479
+    }
+  ],
+  "shipments": [
+    {
+      "orderId": "order-1",
+      "ts": 1784353408522
+    }
+  ]
+}

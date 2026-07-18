@@ -1,0 +1,26 @@
+{
+  "name": "temporal-order-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3 microservices + payment gateway orchestrated by a real Temporal workflow",
+  "scripts": {
+    "svc:order": "tsx src/services/order-svc.ts",
+    "svc:payment": "tsx src/services/payment-svc.ts",
+    "svc:shipment": "tsx src/services/shipment-svc.ts",
+    "svc:gateway": "tsx src/services/gateway.ts",
+    "services": "tsx src/services/all.ts",
+    "worker": "tsx src/worker.ts",
+    "order": "tsx src/client.ts"
+  },
+  "dependencies": {
+    "@temporalio/activity": "^1.11.6",
+    "@temporalio/client": "^1.11.6",
+    "@temporalio/worker": "^1.11.6",
+    "@temporalio/workflow": "^1.11.6"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0"
+  }
+}

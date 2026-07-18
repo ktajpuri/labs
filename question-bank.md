@@ -17,7 +17,7 @@
 ### [dist-txn-A1]
 - lab: dist-txn-lab
 - type: A
-- last_asked: —
+- last_asked: 2026-07-18
 - q: A transfer service commits a debit on DB-A then a credit on DB-B as two plain commits. A crash between them left the system 100 short; your harness showed an operator rerun then produced 800/1100 — still 100 short, alice double-debited. The team's runbook fix is "on partial failure, re-run the transfer job." Drill.
 - ref: A retry of a non-atomic dual-write can't repair it because the retry has no way to know which half already happened — it re-executes both halves, double-applying the one that succeeded (the harness's 900/1000 → 800/1100, invariant violated both times). The gap is structural: no ordering of independent commits is atomic, and no blind retry fixes it. Real fixes change the shape: an atomic commitment protocol (2PC), a saga with compensations, or at minimum idempotency keys per step so a retry becomes a no-op on the half that already ran.
 - grade_note: targets Decision (blind retry double-applies) + Road Not Taken (2PC / saga / idempotency keys). Miss = endorsing rerun, or a fix that doesn't address which-half-already-happened.
@@ -25,7 +25,7 @@
 ### [dist-txn-A2]
 - lab: dist-txn-lab
 - type: A
-- last_asked: —
+- last_asked: 2026-07-18
 - q: Ops finds prepared transactions from a dead coordinator sitting on a Postgres participant, writers timing out behind their locks. The proposed runbook: "old prepared txns are stale garbage — ROLLBACK PREPARED anything older than 10 minutes." Using the lab's S3/S4 pair, drill.
 - ref: S3 and S4 were byte-identical from the participant's view — both prepares voted YES, coordinator silent — yet one was globally uncommitted (no decision on record → presumed abort correct) and the other was COMMITTED (decision logged; recovery must roll FORWARD). A participant-side age heuristic can't distinguish them; blind rollback of a decided-commit txn breaks atomicity exactly when the other participant already committed (XA calls this heuristic damage). The runbook must consult the coordinator's decision log — the log write IS the commit point — and only presume abort when no decision exists.
 - grade_note: targets Decision (age is not evidence of global state) + mechanism (commit point = coordinator log write, participants indistinguishable). Miss = endorsing age-based rollback, or not naming the coordinator log as the arbiter.
@@ -600,8 +600,52 @@
 
 ---
 
+## temporal-durable-execution-lab
+
+### [temporal-A1]
+- lab: temporal-durable-execution-lab
+- type: A
+- last_asked: —
+- q: An order service runs reserve → charge → ship and persists a `status` column, with a supervisor that re-runs any order not SHIPPED. After a deploy, ~1 in 500 orders is double-charged. A teammate proposes "the supervisor is too aggressive — add a 30-second delay before it retries, that'll give the first attempt time to finish." Drill.
+- ref: The delay treats a timing symptom of a structural bug. The double charge happens when the process dies in the window between the charge side effect (money moved) and the `status=CHARGED` write — the two are not atomic, so status lags reality by one step. On resume the supervisor reads `status=RESERVED` and re-charges. A delay changes WHEN the retry runs, not WHAT it finds: whenever a crash lands in that window (crash timing is not under your control), the retry still sees stale status and re-charges. Real fixes change the shape: record each step's RESULT to a durable log and replay/skip completed steps (durable execution), and/or make the charge idempotent (idempotency key) so a re-run is a no-op. Ties to dist-txn-A1 (blind retry can't tell which half already happened).
+- grade_note: targets Decision (delay addresses timing not the non-atomic status/side-effect gap) + Road Not Taken (event-log replay and/or idempotency key). Miss = endorsing the delay, or a fix that doesn't address stale status on resume.
+
+### [temporal-A2]
+- lab: temporal-durable-execution-lab
+- type: A
+- last_asked: —
+- q: After adopting a durable-execution engine (Temporal-style: append-only history + replay), a team declares "charges can never double now — the engine guarantees exactly-once." Their payment activity has no idempotency key. Using the lab's S5, what's wrong with "exactly-once"?
+- ref: The engine guarantees at-least-once step execution + deterministic replay of RECORDED results, not exactly-once side effects. There is a window between "the activity's side effect hit the world" and "the activity's result was appended to history" — a crash there leaves history with no record of the charge, so on replay the engine finds nothing recorded for that step and re-executes it (the lab's S5: crash at charge-side → 2 charges, charge shows `[exec]`). History is the only thing replay trusts; if the world changed but history didn't, the step re-runs. Exactly-once external effects require the engine's at-least-once PLUS an idempotent activity (idempotency key) so the second call no-ops (S5-fix → 1 charge).
+- grade_note: targets Decision (engine = at-least-once, not exactly-once) + mechanism (side-effect-before-history-write window re-runs on replay; idempotency key closes it). Miss = accepting "exactly-once" from the engine alone, or not naming the record-after-side-effect window.
+
+### [temporal-B1]
+- lab: temporal-durable-execution-lab
+- type: B
+- last_asked: —
+- q: (Naive-vs-fixed) A workflow does reserve → charge → ship. State what goes wrong when the process is killed BETWEEN the charge side effect and the persistence of progress in (a) the naive `status`-column version, and (b) a durable-execution engine where the crash lands after the charge result is appended to history — and name the mechanism that makes (b) safe.
+- ref: (a) Naive: the charge hit the world but `status` is still RESERVED (the side effect and the status write are separate, non-atomic writes); the supervisor re-reads status and re-charges → double charge (lab S2). (b) Durable, crash after the history append: on restart the workflow re-runs from the top, but when it reaches the charge step the engine finds the recorded result in history and REPLAYS it — returns the stored value, does not re-run the side effect — then continues at ship → 1 charge (lab S2'). The mechanism is event-sourced replay: each step's result is a durable event, and a recorded step is replayed (not recomputed, not re-executed) on restart.
+- grade_note: essential = naive double-charge from non-atomic status-vs-side-effect + durable replay returns recorded result / skips the step. Miss = describing the fix as "it retries better" without the record-and-replay mechanism, or missing that replay returns the stored result rather than recomputing.
+
+### [temporal-B2]
+- lab: temporal-durable-execution-lab
+- type: B
+- last_asked: —
+- q: (Explain-mechanism) In a durable-execution engine, a workflow computes a promo price at the start. Explain why, on replay after a crash, the price is NOT recomputed — and what would break if the engine recomputed it instead of reading it back.
+- ref: The price is computed inside a STEP, so its result was appended to history as a durable event the first time it ran. On restart the engine re-runs the workflow body but, reaching that step, returns the RECORDED value from history — replay reconstructs in-memory state by replaying results, not by re-executing the logic. If the engine recomputed it (the price function uses a varying promo / randomness), replay would produce a DIFFERENT value than the original run, so the workflow would continue from a state inconsistent with what already happened in the world (e.g. charge at a price different from the one recorded/quoted) — this is exactly the naive bug (lab S4: two charges at different prices) and the general non-determinism hazard: anything non-deterministic must be captured as a recorded step, never re-derived on replay.
+- grade_note: essential = step result recorded in history + replay returns the recorded value (not recompute) + recompute would diverge → inconsistent-with-world state. Miss = thinking replay re-runs the computation, or not connecting divergence to correctness.
+
+### [temporal-B3]
+- lab: temporal-durable-execution-lab
+- type: B
+- last_asked: —
+- q: (Boundary) Name a failure that durable execution does NOT protect against, and state the rule that prevents it. Be specific about where the offending code lives.
+- ref: Two boundaries. (1) At-least-once side effects: a crash between the side effect and the history write re-runs the step on replay (the engine can't know an external system already acted) — the fix is an idempotent activity / idempotency key, which lives OUTSIDE the engine's guarantee. (2) Non-determinism in ORCHESTRATION (workflow-body) code: replay re-executes the body, so a branch on Math.random()/Date.now()/wall-clock/map-order that is NOT inside a recorded step can take a different path on replay than originally ran → recorded history no longer matches the code's actions → non-determinism error/corruption. The rule: all non-determinism and all side effects must live inside steps/activities (whose results are recorded and replayed), never in the orchestration code; and side effects that must be exactly-once need their own idempotency on top of the engine's at-least-once.
+- grade_note: essential = names at least one true boundary (at-least-once side effects OR non-determinism in workflow body) with its rule (idempotency key / "non-determinism goes inside an activity"). Miss = claiming durable execution makes side effects exactly-once by itself, or putting non-deterministic reads in orchestration code.
+
+---
+
 ## Uncovered labs
 
 - **streaming-agg-lab/topk** (Top-K rollup sub-lab): harness built and smoke-tested, README and PLAN.md exist, but no WHY.md / failure matrix yet — Phase 2 scenarios haven't been run. No questions generated; add `topk-A*/B*` entries here once its WHY.md lands.
 
-All ten top-level lab folders (dist-txn-lab, model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, short-id-lab, storage-layout-lab, streaming-agg-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.
+All eleven top-level lab folders (dist-txn-lab, model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, short-id-lab, storage-layout-lab, streaming-agg-lab, temporal-durable-execution-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.

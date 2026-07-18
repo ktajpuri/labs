@@ -1,0 +1,39 @@
+# Temporal server + Web UI + its Postgres persistence.
+# The 4 microservices and the worker run as LOCAL node processes (see package.json),
+# not in here — so you can watch/kill them directly.
+#
+#   docker compose up -d      # start Temporal (UI at http://localhost:8080)
+#   docker compose down       # stop
+#   docker compose down -v     # stop AND wipe Temporal's history (full reset)
+
+services:
+  postgresql:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    ports:
+      - "5432:5432"
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    depends_on:
+      - postgresql
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+    ports:
+      - "7233:7233"   # gRPC endpoint the worker/client connect to
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    ports:
+      - "8080:8080"   # <-- open this in your browser
