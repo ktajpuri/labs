@@ -1,0 +1,8 @@
+services:
+  redis:
+    image: redis:7
+    container_name: pubsub-lab-redis
+    ports:
+      # host 6380 -> container 6379, so this never collides with a default Redis on 6379
+      - "6380:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]

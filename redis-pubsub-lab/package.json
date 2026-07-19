@@ -1,0 +1,14 @@
+{
+  "name": "redis-pubsub-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discovery lab: Redis Pub/Sub delivery semantics (at-most-once, fire-and-forget)",
+  "type": "commonjs",
+  "scripts": {
+    "pub": "node publish-pubsub.js",
+    "sub": "node subscribe-pubsub.js"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1"
+  }
+}

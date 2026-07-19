@@ -621,7 +621,7 @@
 ### [temporal-B1]
 - lab: temporal-durable-execution-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-19
 - q: (Naive-vs-fixed) A workflow does reserve → charge → ship. State what goes wrong when the process is killed BETWEEN the charge side effect and the persistence of progress in (a) the naive `status`-column version, and (b) a durable-execution engine where the crash lands after the charge result is appended to history — and name the mechanism that makes (b) safe.
 - ref: (a) Naive: the charge hit the world but `status` is still RESERVED (the side effect and the status write are separate, non-atomic writes); the supervisor re-reads status and re-charges → double charge (lab S2). (b) Durable, crash after the history append: on restart the workflow re-runs from the top, but when it reaches the charge step the engine finds the recorded result in history and REPLAYS it — returns the stored value, does not re-run the side effect — then continues at ship → 1 charge (lab S2'). The mechanism is event-sourced replay: each step's result is a durable event, and a recorded step is replayed (not recomputed, not re-executed) on restart.
 - grade_note: essential = naive double-charge from non-atomic status-vs-side-effect + durable replay returns recorded result / skips the step. Miss = describing the fix as "it retries better" without the record-and-replay mechanism, or missing that replay returns the stored result rather than recomputing.
@@ -637,10 +637,54 @@
 ### [temporal-B3]
 - lab: temporal-durable-execution-lab
 - type: B
-- last_asked: —
+- last_asked: 2026-07-19
 - q: (Boundary) Name a failure that durable execution does NOT protect against, and state the rule that prevents it. Be specific about where the offending code lives.
 - ref: Two boundaries. (1) At-least-once side effects: a crash between the side effect and the history write re-runs the step on replay (the engine can't know an external system already acted) — the fix is an idempotent activity / idempotency key, which lives OUTSIDE the engine's guarantee. (2) Non-determinism in ORCHESTRATION (workflow-body) code: replay re-executes the body, so a branch on Math.random()/Date.now()/wall-clock/map-order that is NOT inside a recorded step can take a different path on replay than originally ran → recorded history no longer matches the code's actions → non-determinism error/corruption. The rule: all non-determinism and all side effects must live inside steps/activities (whose results are recorded and replayed), never in the orchestration code; and side effects that must be exactly-once need their own idempotency on top of the engine's at-least-once.
 - grade_note: essential = names at least one true boundary (at-least-once side effects OR non-determinism in workflow body) with its rule (idempotency key / "non-determinism goes inside an activity"). Miss = claiming durable execution makes side effects exactly-once by itself, or putting non-deterministic reads in orchestration code.
+
+---
+
+## redis-pubsub-lab
+
+### [pubsub-A1]
+- lab: redis-pubsub-lab
+- type: A
+- last_asked: —
+- q: A team runs multiple WebSocket server instances and adds Redis Pub/Sub as the cross-instance bus so a message on instance A reaches clients on instance B. It works in the demo. They then delete the message-history DB write and the on-join init/history sync, reasoning "Redis Pub/Sub already delivers the messages, the DB was redundant." Drill.
+- ref: Pub/Sub delivers ONLY to subscribers connected at the instant of PUBLISH — it stores nothing and cannot replay (at-most-once). The demo passed because every instance was already subscribed; the DB + init sync were never redundant, they were the ENTIRE durability + latecomer-catch-up layer. After the deletion: a client on an instance that connects/reconnects a moment late (redeploy, GC pause, network blip) permanently loses every message published during its gap, silently (lab S1/S2/S3: late/blipped subscriber received 0 / lost the prefix / lost the mid-stream window, publisher's delivered_to went to 0 with no error). The fix is a durable log (Redis Streams `XADD` + a consumer group reading by position), not Pub/Sub.
+- grade_note: targets Decision (the DB/init was the durability layer, not redundant) + mechanism (at-most-once: message lifetime = the PUBLISH call, no store/replay). Miss = accepting Pub/Sub as sufficient for reliable delivery, or not naming Streams/durable-log as the actual fix.
+
+### [pubsub-A2]
+- lab: redis-pubsub-lab
+- type: A
+- last_asked: —
+- q: To scale a job-processing service, a team runs 3 workers, each subscribing to the same Redis Pub/Sub channel the dispatcher PUBLISHes jobs to, expecting the 3 workers to share the load. Throughput doesn't improve and every job runs 3 times. Using the lab's S4 result, drill.
+- ref: Pub/Sub is a BROADCAST bus, not a work queue — every subscriber receives every message (lab S4: two subscribers each got all 10, delivered_to=2). Three subscribers means each job is delivered to all three and executed three times; there is no load-balancing and no per-message "handled once" semantic. What they want is competing-consumers load-balancing: Redis Streams with a single shared consumer group (lab S4': two consumers in one group split the stream, evens vs odds, each message to exactly one member). The inverse design (fan-out WITH durability, every worker gets every message) would instead use one consumer group PER worker.
+- grade_note: targets Decision (Pub/Sub broadcasts, doesn't load-balance) + Road Not Taken (Streams shared consumer group = work split; one group per consumer = durable fan-out). Miss = expecting Pub/Sub subscribers to share work, or not naming the shared-consumer-group fix.
+
+### [pubsub-B1]
+- lab: redis-pubsub-lab
+- type: B
+- last_asked: —
+- q: (Naive-vs-fixed) A publisher sends 20 messages over 10s; a consumer starts 3s in, mid-stream. State what its `first seq seen` and gap set are (a) with plain Redis Pub/Sub and (b) with a Redis Stream + consumer group created at position 0 — and name the mechanism that moves the boundary.
+- ref: (a) Pub/Sub: `first seq seen ≈ 16` — it receives only messages published AFTER its SUBSCRIBE completes (added to the channel's subscription table); everything before is lost, no gaps within the received suffix (lab S2). (b) Streams: `first seq seen = 1`, all 20, gaps none — `XREADGROUP >` against a group positioned at 0 replays the whole durable log then tails live (lab S2'). The boundary moves from the consumer's CONNECT TIME (Pub/Sub, at-most-once, no stored state) to the GROUP'S POSITION in the log (Streams) — connect time stops mattering because the messages persist independent of who is listening.
+- grade_note: essential = Pub/Sub first≈16/prefix-lost vs Streams first=1/all-received + the boundary shift from connect-time to group-position (durable log + read-by-position). Miss = thinking Pub/Sub replays history, or not naming XREADGROUP/position as the mechanism.
+
+### [pubsub-B2]
+- lab: redis-pubsub-lab
+- type: B
+- last_asked: —
+- q: (Explain-mechanism) On `PUBLISH channel msg` when no client is subscribed, the message is gone with no error and cannot be recovered by a subscriber that connects one millisecond later. Explain mechanically why — what Redis stores, what it does with the message, and how long the message exists.
+- ref: Redis keeps a subscription table mapping channel → the list of client connections currently SUBSCRIBEd. On PUBLISH it walks that list and writes the message to each connected socket, then the message ceases to exist — it is never written to a keyspace, a log, or disk (persistence settings like appendonly are irrelevant; Pub/Sub messages were never storable). The message's entire lifetime is the duration of the PUBLISH call, so zero subscribers at that instant = zero deliveries = unrecoverable. `PUBLISH` returns the integer count of connections that received it (0 here) — the visible tell of at-most-once delivery.
+- grade_note: essential = subscription table (channel→connections, not messages) + PUBLISH walks it and discards + message lifetime = the PUBLISH call (no store/replay). Miss = thinking Redis buffers messages for late subscribers, or invoking persistence config as relevant.
+
+### [pubsub-B3]
+- lab: redis-pubsub-lab
+- type: B
+- last_asked: —
+- q: (Boundary) A team migrates from Pub/Sub to Redis Streams with a consumer group and declares delivery "now guaranteed." Name the failure Streams do NOT prevent, the Redis structure involved, and the only real fix — and explain how batch fetching makes it worse.
+- ref: Streams are AT-LEAST-ONCE, not exactly-once. If a consumer crashes AFTER processing a message but BEFORE `XACK`, the entry stays in the group's Pending Entries List (PEL) and is REDELIVERED on recovery (`XREADGROUP ... 0` / `XAUTOCLAIM`) → a duplicate side effect (e.g. a double charge) — lab S5: seq 3 was processed in run 1 and again on --reclaim. Batch fetching makes it worse: `XREADGROUP COUNT n` moves an entire batch into the consumer's PEL at fetch time, so "delivered" means "assigned to a consumer," NOT "processed" — a crash can strand several unprocessed entries (lab: seqs 3,4,5 all reclaimed though only 1,2,3 were touched). The only safe fix is an idempotent consumer (idempotency key + dedupe store), which lives OUTSIDE Redis's guarantee — identical to the durable-execution / Temporal boundary.
+- grade_note: essential = at-least-once (crash between process and XACK) + PEL redelivery + idempotency as the only fix + batch COUNT strands multiple (delivered≠processed). Miss = claiming Streams give exactly-once, or omitting idempotency/the consumer-side fix.
 
 ---
 
@@ -648,4 +692,4 @@
 
 - **streaming-agg-lab/topk** (Top-K rollup sub-lab): harness built and smoke-tested, README and PLAN.md exist, but no WHY.md / failure matrix yet — Phase 2 scenarios haven't been run. No questions generated; add `topk-A*/B*` entries here once its WHY.md lands.
 
-All eleven top-level lab folders (dist-txn-lab, model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, resilience-patterns-lab, short-id-lab, storage-layout-lab, streaming-agg-lab, temporal-durable-execution-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.
+All twelve top-level lab folders (dist-txn-lab, model-routing-lab, page-cache-lab, partition-skew-lab, redis-atomicity-lab, redis-pubsub-lab, resilience-patterns-lab, short-id-lab, storage-layout-lab, streaming-agg-lab, temporal-durable-execution-lab, workload-bounds) have a why-doc and scenario matrix and are covered above.
