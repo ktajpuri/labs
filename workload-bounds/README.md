@@ -53,6 +53,8 @@ docker stats                                 # per-container CPU/mem
 - `workloads/net_transfer.sh` — iperf3 through a 200 mbit tc egress cap
 - `failure-matrix.md` — predictions vs observations (the deliverable)
 - `why-doc.md` — written at the end
+- `RUNBOOK.md` — **rerun the lab solo as a retrieval drill**: per-scenario setup, exact
+  commands, predict-first stop lines, answers hidden in collapsed reveal blocks
 
 Exact per-scenario commands are issued in-session: prediction on record first,
-then the command. No prediction, no run.
+then the command. No prediction, no run. To rerun without Claude, use `RUNBOOK.md`.
